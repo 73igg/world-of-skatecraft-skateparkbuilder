@@ -2,7 +2,7 @@
 
 This repository distributes the mod's source code, authored interface and shaders, build and
 conversion tools, source patches for external open-source engines, documentation, and licenses.
-The owner's README showcase videos and abilities screenshot are explicitly approved documentation.
+The owner's README showcase videos and screenshots are explicitly approved documentation.
 It does not distribute World of Warcraft or Skate game files or assets. Every player supplies
 their own game copies and converts any required assets locally.
 

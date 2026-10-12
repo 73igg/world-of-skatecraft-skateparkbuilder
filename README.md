@@ -17,6 +17,8 @@ https://github.com/user-attachments/assets/7d2f8374-8227-45dc-9663-7c5b1d77b768
 
 *[Download the full-resolution builder video](docs/media/skatebuilder.mp4?raw=true).*
 
+![Object Catalog with game filters, search, and a model preview](docs/media/object-catalog.png)
+
 - Open the editor with **F8** or the **Park Builder** ability. Place ramps, quarter pipes, rails,
   platforms, boxes and stairs, or pick a model from the **Object Catalog**.
 - Search names, aliases, model paths and asset IDs. Filter by **WoW / Skate / procedural**, choose

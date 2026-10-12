@@ -28,6 +28,7 @@ APPROVED_MEDIA: dict[str, str] = {
     'docs/media/respawn-flag.mp4': 'b8b22c9ccf05860ab64aaf4394abae23a2e7be146dc9a986689698ab5c1fba8a',
     'docs/media/respawn-flag-preview.png': '3c40f42cd17e48cd7f25cfd0a5f7b6f74a11985bce77ee0c133bc04996f0cf9b',
     'docs/media/new-abilities.png': 'a81d714e6c5bda759f1290fae38a518c954b4b3761fabdb81a9ad6097f7ed1c2',
+    'docs/media/object-catalog.png': '23c5799b38997f9840e667706814aebbe2e60fdeae810d76573f369ab2040758',
 }
 SOURCE_SUFFIXES = {".rs", ".c", ".h", ".toml", ".lock", ".md", ".wgsl", ".py", ".sh", ".ps1", ".bat", ".patch", ".yml", ".yaml", ".nix"}
 UI_FILES = {
