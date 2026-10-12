@@ -32,6 +32,7 @@ mod camera_channel;
 pub(crate) mod camera_dynamics;
 pub(crate) mod camera_zoom;
 mod controller;
+mod skate_camera;
 mod world_focus;
 // The remembered camera pose, inside `player/` to read the rig's `pub(super)` fields.
 mod camera_saved;
@@ -207,6 +208,7 @@ impl Plugin for PlayerPlugin {
         follow::plugin(app);
         camera_saved::plugin(app);
         camera_view::plugin(app);
+        skate_camera::plugin(app);
         // The stream focus is published after `control`'s teleport snap and before the stream
         // stage, and the post-snap hold released after it. Both edges are needed: without
         // `.after(Input)` the focus can precede the snap, the world streams around the departure,

@@ -186,10 +186,21 @@ impl WorldCollision<'_, '_> {
     /// [`CAMERA_PROBE_RADIUS`] sphere; with `liquid` (`cameraWaterCollision`) set, the waterline
     /// takes a ray ([`waterline_ray`](Self::waterline_ray)). The nearer hit wins.
     pub fn cast_camera(&self, from: Vec3, movement: Vec3, liquid: bool) -> Option<f32> {
+        self.cast_camera_with_radius(from, movement, CAMERA_PROBE_RADIUS, liquid)
+    }
+
+    /// Final camera clearance can include the near-plane corners at the current aspect ratio.
+    pub fn cast_camera_with_radius(
+        &self,
+        from: Vec3,
+        movement: Vec3,
+        radius: f32,
+        liquid: bool,
+    ) -> Option<f32> {
         let solid = self
             .ms
             .cast_move(
-                &Collider::sphere(CAMERA_PROBE_RADIUS),
+                &Collider::sphere(radius),
                 from,
                 Quat::IDENTITY,
                 movement,

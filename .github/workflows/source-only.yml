@@ -1,0 +1,23 @@
+name: Source-only audit
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject game assets in all fork commits
+        run: python3 scripts/audit_source.py --since 2f97dcc8ba1232d1c3e108f1ef0fa6d06fb61fee
+      - name: Verify the audit rejects forced assets and deleted historical assets
+        run: python3 scripts/test_source_audit.py

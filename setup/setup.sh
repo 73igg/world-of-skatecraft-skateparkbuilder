@@ -219,6 +219,7 @@ fi
 
 # ── Build ──────────────────────────────────────────────────────────────────────────────────────
 step "Building the game (first time: several minutes)"
+python3 "$ROOT/setup/prepare_skate_engine.py" || die "the skate camera host could not be prepared" "see the lines above"
 cargo build --release -p benilla || die "the build failed (see the lines above)" "$(packages_hint)"
 
 step "Done"

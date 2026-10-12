@@ -105,7 +105,7 @@ run() {
     note_timing "$name" "$((SECONDS - t0))" "ok"
 }
 
-run fmt cargo fmt --all -- --check
+run fmt python3 scripts/format_workspace.py --check
 run clippy cargo clippy --workspace --all-targets -- -D warnings
 
 # test: where the install resolves and the `wow-addons-vanilla` corpus link exists,

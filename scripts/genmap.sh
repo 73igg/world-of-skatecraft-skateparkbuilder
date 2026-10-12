@@ -120,6 +120,6 @@ field() { grep -m1 "^$2" "$1" 2>/dev/null | sed -E "s/^$2[[:space:]]*=[[:space:]
   done
   echo
 
-} > docs/MAP.md
+} | sed -E 's/[[:blank:]]+$//' > docs/MAP.md
 
 echo "genmap: wrote docs/MAP.md"

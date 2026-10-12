@@ -66,6 +66,7 @@ pub(super) fn control(
         Res<scoped_view::ScopedView>,
         // The loading cover blanks input at the source; a gesture in flight is unwound below.
         Res<crate::loading_screen::LoadingScreen>,
+        Option<Res<crate::park::ParkEditor>>,
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -88,6 +89,7 @@ pub(super) fn control(
         Query<&ChildOf>,
     ),
 ) {
+    rig.skate_seated = false;
     let (world, transports, child_of) = (&world_q.0, &world_q.1, &world_q.2);
     let (left_click, right_click) = (&mut *click_test.0, &mut *click_test.1);
     let Ok((mut cam_t, mut cam)) = cameras.single_mut() else {
@@ -299,6 +301,13 @@ pub(super) fn control(
             .map(|(_, t, ..)| (t.translation, server_ride::yaw_of(t.rotation))),
     );
 
+    if speed_capsule.10.as_ref().is_some_and(|park| park.active) {
+        movement_net::park_mover(&net.0 .0, &mut player);
+        player.horiz_vel = Vec3::ZERO;
+        player.vel_y = 0.0;
+        return;
+    }
+
     let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or_zero();
 
     // On a transport, recompose the rider from the deck's pose this frame, before input integrates.
@@ -372,7 +381,10 @@ pub(super) fn control(
                 self_guid,
             );
             match pointer.6.camera.filter(|_| pointer.6.engine_camera) {
-                Some(camera) => *cam_t = camera,
+                Some(camera) => {
+                    *cam_t = camera;
+                    rig.skate_seated = true;
+                }
                 None => {
                     // The WoW camera swings in behind the direction of travel while the board
                     // rolls; a held mouse button owns it, to look around.

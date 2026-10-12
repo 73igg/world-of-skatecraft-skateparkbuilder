@@ -6,20 +6,26 @@
 
 mod board;
 mod export;
+pub(crate) mod flag;
+mod input;
+mod input_buffer;
+mod latest;
 mod profession;
 mod rails;
 mod rig;
 mod score;
 mod sound;
+mod work;
 
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Mutex};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use benilla_world::collision::WorldCollision;
 use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use skate_host::bridge::{ControllerTransport, InputFrame, PreparedCollision, Session};
+use skate_host::bridge::{InputFrame, PreparedCollision, Session};
 
 use crate::net::NetHandlerApp;
 
@@ -73,10 +79,16 @@ pub(crate) struct SkateDrive {
     pub(crate) pos: Vec3,
     /// Facing (Bevy yaw): the direction of travel, else the board's heading.
     pub(crate) yaw: f32,
+    /// Actual skater facing, independent of the board's direction of travel.
+    pub(crate) facing: f32,
+    #[cfg(feature = "dev")]
+    pub(crate) offboard: bool,
     /// Horizontal speed, yd/s.
     pub(crate) speed: f32,
     /// The engine's own follow camera, Bevy world.
     pub(crate) camera: Option<Transform>,
+    pub(crate) camera_distance: f32,
+    pub(crate) camera_height: f32,
     /// Ride with the engine's camera rather than our follow camera (`K` toggles).
     pub(crate) engine_camera: bool,
 }
@@ -106,21 +118,38 @@ impl SkatePose {
     }
 }
 
+struct CollisionInput {
+    world: Vec<Tri>,
+    props: Vec<Tri>,
+    rails: Vec<Vec<[f32; 3]>>,
+    revision: u64,
+}
+impl CollisionInput {
+    fn bake(self) -> (Vec<Tri>, Vec<Vec<[f32; 3]>>) {
+        let mut rails = find_rails(&self.world);
+        rails.extend(self.rails);
+        let props = crate::park::clean_skate_contacts(&self.world, self.props);
+        let mut triangles = self.world;
+        triangles.extend(props);
+        (triangles, rails)
+    }
+}
+
 enum Job {
     /// Start riding at `spawn` (engine space) on fresh collision; a new session the first time.
     Activate {
         epoch: u64,
-        triangles: Vec<Tri>,
+        collision: CollisionInput,
         spawn: Vec3,
         heading: f32,
         aspect: f32,
+        boosts: profession::Boosts,
+        offboard: bool,
     },
     /// Collision gathered around the skater, built off the simulation and swapped in.
-    Rebuild(u64, Vec<Tri>),
+    Rebuild(u64, CollisionInput),
     Step {
         epoch: u64,
-        dt: f32,
-        input: InputFrame,
         aspect: f32,
         boosts: profession::Boosts,
     },
@@ -135,6 +164,7 @@ enum Reply {
 
 /// One engine pose, out of the engine's own math types (its Bevy is not ours).
 struct Frame {
+    published_at: Instant,
     root: Mat4,
     bones: Vec<Mat4>,
     names: Vec<String>,
@@ -154,6 +184,7 @@ struct Frame {
 fn frame(p: skate_host::bridge::Pose) -> Frame {
     let m = |c: [f32; 16]| Mat4::from_cols_array(&c);
     Frame {
+        published_at: Instant::now(),
         root: m(p.root.to_cols_array()),
         bones: p.bones.iter().map(|b| m(b.to_cols_array())).collect(),
         names: p.names,
@@ -176,9 +207,9 @@ fn frame(p: skate_host::bridge::Pose) -> Frame {
 
 #[derive(Resource, Default)]
 struct Host {
-    send: Option<mpsc::Sender<Job>>,
-    receive: Option<Mutex<mpsc::Receiver<Reply>>>,
-    transport: Mutex<ControllerTransport>,
+    send: Option<work::Sender>,
+    receive: Option<work::Replies>,
+    input: Option<Arc<input::Sampler>>,
     epoch: u64,
     /// `J` was pressed and the worker is placing the skater.
     activating: bool,
@@ -187,6 +218,8 @@ struct Host {
     /// Where the collision was last gathered around, and when.
     centre: Vec3,
     gathered_at: f32,
+    geometry_revision: u64,
+    park_revision: u64,
     logged_tick: u64,
     /// The `WOW_SKATE_AUTOSTART` hook: when we became free to ride, and whether it has fired.
     ready_since: Option<f32>,
@@ -199,8 +232,6 @@ struct Host {
     dismissing: bool,
     /// Rocket Boost's aura was on us last frame.
     rocket_on: bool,
-    /// The pad's buttons last frame, for presses.
-    buttons: u16,
 }
 
 fn autostart_after() -> Option<f32> {
@@ -209,7 +240,7 @@ fn autostart_after() -> Option<f32> {
 }
 
 /// Grind rails over engine-space triangles: [`rails::find`] runs in inches, z up.
-fn find_rails(tris: &[Tri]) -> Vec<Vec<[f32; 3]>> {
+pub(crate) fn find_rails(tris: &[Tri]) -> Vec<Vec<[f32; 3]>> {
     const INCH: f32 = 0.0254;
     let z_up: Vec<[Vec3; 3]> = tris
         .iter()
@@ -230,138 +261,221 @@ fn find_rails(tris: &[Tri]) -> Vec<Vec<[f32; 3]>> {
         .collect()
 }
 
-fn spawn_worker(root: PathBuf) -> std::io::Result<(mpsc::Sender<Job>, mpsc::Receiver<Reply>)> {
-    let (send, jobs) = mpsc::channel();
-    let (publish, replies) = mpsc::channel();
+fn spawn_worker(
+    root: PathBuf,
+) -> std::io::Result<(work::Sender, work::Replies, Arc<input::Sampler>)> {
+    let (send, jobs) = work::channel();
+    let (publish, replies) = work::replies();
+    let input = Arc::new(input::Sampler::spawn()?);
+    let worker_input = input.clone();
     std::thread::Builder::new()
         .name("skate".into())
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            if let Err(e) = run_worker(&root, jobs, &publish) {
-                let _ = publish.send(Reply::Error(e));
+            if let Err(e) = run_worker(&root, jobs, &publish, &worker_input) {
+                publish.send(Reply::Error(e));
             }
         })?;
-    Ok((send, replies))
+    Ok((send, replies, input))
 }
 
-/// The worker: one retained session, reactivated at each `J`.
+/// Native simulation deadlines, independently of render-frame work and controller polling.
 fn run_worker(
     root: &Path,
-    jobs: mpsc::Receiver<Job>,
-    publish: &mpsc::Sender<Reply>,
+    jobs: work::Receiver,
+    publish: &work::Publisher,
+    input: &input::Sampler,
 ) -> Result<(), String> {
     let mut session: Option<Session> = None;
-    let (built_send, built) = mpsc::channel::<(u64, Result<PreparedCollision, String>)>();
-    let mut builds: Option<mpsc::Sender<(u64, Vec<Tri>)>> = None;
+    let (built_send, built) = latest::channel::<(u64, u64, Result<PreparedCollision, String>)>();
+    let mut built_send = Some(built_send);
+    let mut builds: Option<latest::Sender<(u64, CollisionInput)>> = None;
+    let mut collision_revision = 0;
     let mut epoch = 0;
-    let mut accumulated = 0.0;
+    let mut active = false;
+    let mut next_tick = Instant::now();
+    let mut input_generation = 0;
+    let mut boosts = profession::Boosts::default();
+    let mut rocket_pending = false;
     let mut boost_state = profession::BoostState::default();
-    while let Ok(job) = jobs.recv() {
-        match job {
-            Job::Activate {
-                epoch: e,
-                triangles,
-                spawn,
-                heading,
-                aspect,
-            } => {
-                epoch = e;
-                accumulated = 0.0;
-                let start = std::time::Instant::now();
-                let rails = find_rails(&triangles);
-                let s = match session.as_mut() {
-                    Some(s) => {
-                        let prepared = s.collision_builder().build(triangles, rails)?;
-                        s.install_collision(prepared)?;
-                        s
-                    }
-                    None => {
-                        let mut s =
-                            Session::new(root, triangles, rails, spawn.to_array(), heading)?;
-                        // A bail gets up where it fell, not back at the top of a drop.
-                        s.set_respawn_in_place(true);
-                        let builder = s.collision_builder();
-                        let (tx, rx) = mpsc::channel::<(u64, Vec<Tri>)>();
-                        let built_send = built_send.clone();
-                        std::thread::Builder::new()
-                            .name("skate-collision".into())
-                            .stack_size(32 * 1024 * 1024)
-                            .spawn(move || {
-                                while let Ok(mut job) = rx.recv() {
-                                    while let Ok(newer) = rx.try_recv() {
-                                        job = newer;
+    let mut last_report = Instant::now();
+    let mut max_age = Duration::ZERO;
+    let mut max_tick = Duration::ZERO;
+    let mut ticks = 0u64;
+    let mut missed = 0u64;
+    loop {
+        let timeout = if active {
+            next_tick.saturating_duration_since(Instant::now())
+        } else {
+            Duration::from_secs(3600)
+        };
+        match jobs.recv_timeout(timeout) {
+            work::Received::Closed => break,
+            work::Received::Timeout => {}
+            work::Received::Job(job) => match job {
+                Job::Activate {
+                    epoch: e,
+                    collision,
+                    spawn,
+                    heading,
+                    aspect,
+                    boosts: initial_boosts,
+                    offboard,
+                } => {
+                    epoch = e;
+                    let started = Instant::now();
+                    collision_revision = collision.revision;
+                    let (triangles, rails) = collision.bake();
+                    let s = match session.as_mut() {
+                        Some(s) => {
+                            let prepared = s.collision_builder().build(triangles, rails)?;
+                            s.install_collision(prepared)?;
+                            s
+                        }
+                        None => {
+                            let mut s =
+                                Session::new(root, triangles, rails, spawn.to_array(), heading)?;
+                            s.set_respawn_in_place(true);
+                            let builder = s.collision_builder();
+                            let (tx, rx) = latest::channel::<(u64, CollisionInput)>();
+                            let completed = built_send.take().expect("one collision builder");
+                            std::thread::Builder::new()
+                                .name("skate-collision".into())
+                                .stack_size(32 * 1024 * 1024)
+                                .spawn(move || {
+                                    while let Some((e, collision)) = rx.recv() {
+                                        let revision = collision.revision;
+                                        let (tris, rails) = collision.bake();
+                                        completed.send((e, revision, builder.build(tris, rails)));
                                     }
-                                    let (e, tris) = job;
-                                    let rails = find_rails(&tris);
-                                    if built_send.send((e, builder.build(tris, rails))).is_err() {
-                                        break;
-                                    }
-                                }
-                            })
-                            .map_err(|e| e.to_string())?;
-                        builds = Some(tx);
-                        session.insert(s)
-                    }
-                };
-                s.set_aspect_ratio(aspect);
-                let p = s.activate(spawn.to_array(), heading)?;
-                info!("skate: on the board in {} ms", start.elapsed().as_millis());
-                if publish.send(Reply::Activated(epoch, frame(p))).is_err() {
-                    break;
-                }
-            }
-            Job::Rebuild(e, tris) => {
-                if let Some(tx) = &builds {
-                    let _ = tx.send((e, tris));
-                }
-            }
-            Job::Suspend => {
-                accumulated = 0.0;
-                if let Some(s) = session.as_mut() {
-                    s.suspend_input();
-                }
-            }
-            Job::Step {
-                epoch: e,
-                dt,
-                input,
-                aspect,
-                boosts,
-            } => {
-                let Some(s) = session.as_mut().filter(|_| e == epoch) else {
-                    continue;
-                };
-                while let Ok((built_epoch, prepared)) = built.try_recv() {
-                    match prepared {
-                        Ok(p) if built_epoch == epoch => s.install_collision(p)?,
-                        Ok(_) => {}
-                        Err(e) => warn!("skate collision: {e}"),
-                    }
-                }
-                s.set_aspect_ratio(aspect);
-                s.collect(input, dt);
-                accumulated = (accumulated + dt).min(0.15);
-                if boosts.rocket {
-                    profession::rocket(s);
-                }
-                let mut advanced = false;
-                // The engine's camera can change the simulation period.
-                while accumulated >= s.period() {
-                    accumulated -= s.period();
-                    s.advance()?;
+                                })
+                                .map_err(|e| e.to_string())?;
+                            builds = Some(tx);
+                            session.insert(s)
+                        }
+                    };
+                    s.set_aspect_ratio(aspect);
+                    boosts = initial_boosts;
+                    boosts.rocket = false;
+                    rocket_pending = false;
+                    boost_state = profession::BoostState::default();
                     profession::apply(s, &boosts, &mut boost_state);
-                    advanced = true;
+                    s.set_camera_type(boosts.camera_preset.engine_type());
+                    let p = if offboard {
+                        s.activate_offboard(spawn.to_array(), heading)?
+                    } else {
+                        s.activate(spawn.to_array(), heading)?
+                    };
+                    input.reset();
+                    active = true;
+                    next_tick = Instant::now() + Duration::from_secs_f32(s.period());
+                    info!(
+                        "skate: on the board in {} ms",
+                        started.elapsed().as_millis()
+                    );
+                    publish.send(Reply::Activated(epoch, frame(p)));
                 }
-                if advanced {
-                    let p = s.pose();
-                    if !p.root.is_finite() || p.bones.iter().any(|b| !b.is_finite()) {
-                        return Err("the engine published a non-finite pose".into());
-                    }
-                    if publish.send(Reply::Pose(epoch, frame(p))).is_err() {
-                        break;
+                Job::Rebuild(e, collision) if e == epoch && active => {
+                    collision_revision = collision.revision;
+                    if let Some(tx) = &builds {
+                        tx.send((e, collision));
                     }
                 }
+                Job::Rebuild(..) => {}
+                Job::Suspend => {
+                    active = false;
+                    rocket_pending = false;
+                    input.reset();
+                    if let Some(s) = session.as_mut() {
+                        s.suspend_input();
+                    }
+                }
+                Job::Step {
+                    epoch: e,
+                    aspect,
+                    boosts: settings,
+                } if e == epoch && active => {
+                    boosts = settings;
+                    rocket_pending |= boosts.rocket;
+                    boosts.rocket = false;
+                    if let Some(s) = session.as_mut() {
+                        s.set_aspect_ratio(aspect);
+                    }
+                }
+                Job::Step { .. } => {}
+            },
+        }
+        let Some(s) = session.as_mut().filter(|_| active) else {
+            continue;
+        };
+        if let Some((built_epoch, revision, prepared)) = built.take() {
+            match prepared {
+                Ok(p) if built_epoch == epoch && revision == collision_revision => {
+                    let started = Instant::now();
+                    s.install_collision(p)?;
+                    let elapsed = started.elapsed();
+                    if elapsed > Duration::from_millis(25) {
+                        warn!(
+                            "skate input: collision installation took {} ms",
+                            elapsed.as_millis()
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => warn!("skate collision: {e}"),
             }
+        }
+        let now = Instant::now();
+        if now < next_tick {
+            continue;
+        }
+        let period = Duration::from_secs_f32(s.period());
+        if now.saturating_duration_since(next_tick) > period * 2 {
+            missed += (now.saturating_duration_since(next_tick).as_secs_f64()
+                / period.as_secs_f64()) as u64;
+            next_tick = now;
+        }
+        let (sample, generation, discarded) = input.take(now);
+        if generation != input_generation {
+            s.suspend_input();
+            input_generation = generation;
+        }
+        let input_frame = sample.map_or_else(InputFrame::neutral, |sample| {
+            max_age = max_age.max(now.saturating_duration_since(sample.at));
+            sample.value
+        });
+        s.collect(input_frame, period.as_secs_f32());
+        s.set_camera_type(boosts.camera_preset.engine_type());
+        if rocket_pending {
+            profession::rocket(s);
+            rocket_pending = false;
+        }
+        profession::apply(s, &boosts, &mut boost_state);
+        let started = Instant::now();
+        s.advance()?;
+        profession::apply(s, &boosts, &mut boost_state);
+        max_tick = max_tick.max(started.elapsed());
+        ticks += 1;
+        next_tick += Duration::from_secs_f32(s.period());
+        let p = s.pose();
+        if !p.root.is_finite() || p.bones.iter().any(|b| !b.is_finite()) {
+            return Err("the engine published a non-finite pose".into());
+        }
+        publish.send(Reply::Pose(epoch, frame(p)));
+        if last_report.elapsed() >= Duration::from_secs(10) {
+            info!(
+                "skate input: ticks={} max_sample_age_ms={:.2} max_tick_ms={:.2} missed_deadlines={} discarded_samples={}",
+                ticks,
+                max_age.as_secs_f64() * 1000.0,
+                max_tick.as_secs_f64() * 1000.0,
+                missed,
+                discarded
+            );
+            max_age = Duration::ZERO;
+            max_tick = Duration::ZERO;
+            ticks = 0;
+            missed = 0;
+            last_report = Instant::now();
         }
     }
     Ok(())
@@ -369,10 +483,16 @@ fn run_worker(
 
 /// Every collision triangle in the box around `centre`, engine space; zero-area faces are left
 /// out, as their NaN normals poison the board's physics.
-fn gather(collide: &WorldCollision, centre: Vec3, origin: Vec3) -> Vec<Tri> {
+fn gather(
+    collide: &WorldCollision,
+    centre: Vec3,
+    origin: Vec3,
+    scene: &crate::park::ParkScene,
+) -> Vec<Tri> {
     collide
         .faces_near_body(centre, GATHER_HALF, usize::MAX)
         .into_iter()
+        .filter(|face| !scene.entities.contains(&face.entity))
         .filter_map(|face| {
             let t = face.verts().map(|v| to_skate(v, origin));
             let solid = t.iter().all(|v| v.is_finite())
@@ -396,9 +516,56 @@ fn stop(host: &mut Host, drive: &mut SkateDrive, pose: &mut SkatePose) {
     pose.active = false;
 }
 
-fn present(frame: Frame, origin: Vec3, drive: &mut SkateDrive, pose: &mut SkatePose) {
+#[allow(clippy::too_many_arguments)]
+fn leave_world(
+    In(event): In<benilla_protocol::SessionEvent>,
+    self_guid: Res<crate::net::SelfGuid>,
+    mut host: ResMut<Host>,
+    mut drive: ResMut<SkateDrive>,
+    mut pose: ResMut<SkatePose>,
+    mut audio: ResMut<sound::SkateAudio>,
+    mut score: ResMut<score::SkateScore>,
+    mut boards: Query<&mut Visibility, With<board::BoardPart>>,
+) {
+    let leaving = match event {
+        benilla_protocol::SessionEvent::Disconnected { .. }
+        | benilla_protocol::SessionEvent::LoggedOut
+        | benilla_protocol::SessionEvent::TransferPending { .. }
+        | benilla_protocol::SessionEvent::Worldport { .. } => true,
+        benilla_protocol::SessionEvent::Teleport { guid, .. } => Some(guid) == self_guid.0,
+        _ => false,
+    };
+    if !leaving {
+        return;
+    }
+    stop(&mut host, &mut drive, &mut pose);
+    host.landed = None;
+    host.rocket_on = false;
+    host.ready_since = None;
+    audio.reset();
+    score.clear_live();
+    for mut visibility in &mut boards {
+        *visibility = Visibility::Hidden;
+    }
+}
+
+fn present(
+    frame: Frame,
+    origin: Vec3,
+    drive: &mut SkateDrive,
+    pose: &mut SkatePose,
+    camera_distance: f32,
+) {
     drive.pos = from_skate(frame.root.w_axis.truncate(), origin);
+    #[cfg(feature = "dev")]
+    {
+        drive.offboard = frame.state.starts_with("Biped");
+    }
     let flat = Vec3::new(frame.velocity.x, 0.0, frame.velocity.z);
+    let facing = frame.root.z_axis.truncate();
+    if facing.x * facing.x + facing.z * facing.z > 1e-6 {
+        drive.facing = f32::atan2(-facing.x, -facing.z);
+    }
     drive.speed = flat.length() / METERS_PER_YARD;
     let heading = if drive.moving() {
         flat
@@ -410,8 +577,8 @@ fn present(frame: Frame, origin: Vec3, drive: &mut SkateDrive, pose: &mut SkateP
         // Bevy yaw `θ` faces `(−sin θ, 0, −cos θ)`.
         drive.yaw = f32::atan2(-heading.x, -heading.z);
     }
-    // The engine frames a skater; a WoW character reads small at that range, so the camera is
-    // pulled back along its line to the hips.
+    // Publish the native eye unchanged. The final camera pass applies distance and collision
+    // together; scaling a checked eye around animated hips introduces clipping and push wobble.
     let hips = frame
         .names
         .iter()
@@ -419,11 +586,14 @@ fn present(frame: Frame, origin: Vec3, drive: &mut SkateDrive, pose: &mut SkateP
         .and_then(|i| frame.bones.get(i))
         .map(|b| frame.root.transform_point3(b.w_axis.truncate()));
     drive.camera = frame.camera.and_then(|(position, basis)| {
-        let position = hips.map_or(position, |h| h + (position - h) * camera_pull());
         let at = from_skate(position, origin);
         let look = basis.z_axis.try_normalize()?;
         let up = basis.y_axis.try_normalize()?;
         Some(Transform::from_translation(at).looking_to(look, up))
+    });
+    drive.camera_distance = camera_distance;
+    drive.camera_height = hips.map_or(1., |h| {
+        (h - frame.root.w_axis.truncate()).y / METERS_PER_YARD
     });
     pose.origin = origin;
     // The engine leaves the root's last row unset (its teleport writes `w = 0`).
@@ -435,19 +605,6 @@ fn present(frame: Frame, origin: Vec3, drive: &mut SkateDrive, pose: &mut SkateP
     );
     pose.bones = frame.bones;
     pose.names = frame.names;
-}
-
-/// How much farther than the engine's own framing the skate camera sits: `WOW_SKATE_CAM_PULL`,
-/// default 2.
-fn camera_pull() -> f32 {
-    static PULL: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *PULL.get_or_init(|| {
-        std::env::var("WOW_SKATE_CAM_PULL")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .filter(|v: &f32| *v > 0.0)
-            .unwrap_or(2.0)
-    })
 }
 
 /// Decodes the animation banks while the world loads, so the first `J` only places the skater.
@@ -490,7 +647,20 @@ fn update(
     mut audio: ResMut<sound::SkateAudio>,
     profession: profession::Profession,
     mut score: ResMut<score::SkateScore>,
+    park: (
+        Res<crate::park::ParkEditor>,
+        Res<crate::park::ParkWorld>,
+        Res<crate::park::ParkScene>,
+    ),
+    mut flags: ResMut<flag::State>,
 ) {
+    if park.0.active {
+        if drive.active || host.activating {
+            stop(&mut host, &mut drive, &mut pose);
+            audio.reset();
+        }
+        return;
+    }
     let aspect = windows
         .single()
         .map(|w| w.width() / w.height().max(1.0))
@@ -500,8 +670,13 @@ fn update(
     let auras = profession.auras();
     let riding = drive.active || host.activating;
     if riding && !player.may_skate() {
+        let returning = flags.returning.is_some();
+        if returning {
+            info!("skate flag: native activation held until destination is ready");
+        }
         stop(&mut host, &mut drive, &mut pose);
-        if server_board && auras.board {
+        // A flag's loading hold is part of its return, so keep the mode alive for the retry.
+        if server_board && auras.board && !returning {
             profession.dismiss();
             host.dismissing = true;
         }
@@ -531,8 +706,21 @@ fn update(
             }
         } else if drive.active || host.activating {
             stop(&mut host, &mut drive, &mut pose);
-        } else if player.may_skate() {
-            start(&time, &collide, &player, aspect, &mut host);
+        } else if player.may_skate() && flags.may_resume(player.pos) {
+            start(
+                &time,
+                &collide,
+                &player,
+                aspect,
+                profession::Boosts::from_auras(
+                    auras,
+                    profession.speed(),
+                    profession.camera_preset(),
+                ),
+                (&park.1, &park.2),
+                &mut host,
+                flags.offboard(),
+            );
         }
     }
     if server_board {
@@ -541,30 +729,42 @@ fn update(
             if drive.active || host.activating {
                 stop(&mut host, &mut drive, &mut pose);
             }
-        } else if !host.dismissing && !drive.active && !host.activating && player.may_skate() {
-            start(&time, &collide, &player, aspect, &mut host);
+        } else if !host.dismissing
+            && !drive.active
+            && !host.activating
+            && player.may_skate()
+            && flags.may_resume(player.pos)
+        {
+            start(
+                &time,
+                &collide,
+                &player,
+                aspect,
+                profession::Boosts::from_auras(
+                    auras,
+                    profession.speed(),
+                    profession.camera_preset(),
+                ),
+                (&park.1, &park.2),
+                &mut host,
+                flags.offboard(),
+            );
         }
     }
     let rocket = auras.rocket && !host.rocket_on;
     host.rocket_on = auras.rocket;
 
-    let mut replies = Vec::new();
-    if let Some(receive) = &host.receive {
-        let receive = receive.lock().unwrap();
-        loop {
-            match receive.try_recv() {
-                Ok(reply) => replies.push(reply),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    replies.push(Reply::Error("the skate worker stopped".into()));
-                    break;
-                }
-            }
-        }
-    }
+    let replies = host
+        .receive
+        .as_ref()
+        .map_or_else(Vec::new, work::Replies::take);
     for reply in replies {
         match reply {
             Reply::Activated(epoch, f) if epoch == host.epoch && host.activating => {
+                if flags.offboard() {
+                    info!("skate flag: returned holding board state={}", f.state);
+                    flags.resumed();
+                }
                 host.activating = false;
                 drive.active = true;
                 // `WOW_SKATE_CAM=engine` starts on the engine's camera.
@@ -582,15 +782,22 @@ fn update(
                 host.landed = Some((f.landed_lines, f.landed_points));
                 audio.reset();
                 audio.observe(&f.state, f.velocity);
-                present(f, host.origin, &mut drive, &mut pose);
+                present(
+                    f,
+                    host.origin,
+                    &mut drive,
+                    &mut pose,
+                    profession.camera_distance(),
+                );
             }
             Reply::Pose(epoch, f) if epoch == host.epoch && drive.active => {
                 if f.tick / 120 != host.logged_tick / 120 {
                     info!(
-                        "skate tick={} speed={:.2} yd/s state={}",
+                        "skate tick={} speed={:.2} yd/s state={} pose_age_ms={:.2}",
                         f.tick,
                         f.velocity.length() / METERS_PER_YARD,
-                        f.state
+                        f.state,
+                        f.published_at.elapsed().as_secs_f64() * 1000.0
                     );
                     host.logged_tick = f.tick;
                     if std::env::var_os("WOW_SKATE_DEBUG").is_some() {
@@ -628,13 +835,20 @@ fn update(
                     profession.landed(f64::from(line), &score::trick_label(&f.landed_trick));
                 }
                 audio.observe(&f.state, f.velocity);
-                present(f, host.origin, &mut drive, &mut pose);
+                present(
+                    f,
+                    host.origin,
+                    &mut drive,
+                    &mut pose,
+                    profession.camera_distance(),
+                );
             }
             Reply::Error(e) => {
                 warn!("skate stopped: {e}");
                 stop(&mut host, &mut drive, &mut pose);
                 host.send = None;
                 host.receive = None;
+                host.input = None;
                 return;
             }
             _ => {}
@@ -650,22 +864,36 @@ fn update(
     if Vec3::new(rolled.x, 0.0, rolled.z).length() > RECENTRE
         || rolled.y.abs() > GATHER_HALF.y * 0.5
         || now - host.gathered_at > REFRESH_SECS
+        || host.park_revision != park.1.generation
     {
-        let triangles = gather(&collide, drive.pos, host.origin);
+        host.geometry_revision = host.geometry_revision.wrapping_add(1);
+        host.park_revision = park.1.generation;
+        let triangles = gather(&collide, drive.pos, host.origin, &park.2);
+        let (props, rails) =
+            crate::park::authored_collision(&park.1, drive.pos, GATHER_HALF, host.origin);
+        let collision = CollisionInput {
+            world: triangles,
+            props,
+            rails,
+            revision: host.geometry_revision,
+        };
         host.centre = drive.pos;
         host.gathered_at = now;
         if let Some(send) = &host.send {
-            let _ = send.send(Job::Rebuild(host.epoch, triangles));
+            let _ = send.send(Job::Rebuild(host.epoch, collision));
         }
     }
-    let input = host.transport.lock().unwrap().poll();
-    let buttons = input.buttons();
-    let pressed = buttons & !host.buttons;
-    host.buttons = buttons;
-    if server_board && buttons & profession::PAD_LB == 0 {
-        profession.dpad(pressed);
+    let (pad, edges) = host
+        .input
+        .as_ref()
+        .map_or((false, Vec::new()), |input| input.edges(Instant::now()));
+    if server_board {
+        for edge in edges {
+            if edge.held & profession::PAD_LB == 0 {
+                profession.dpad(edge.pressed);
+            }
+        }
     }
-    let pad = input.controller().is_some();
     if pad != host.pad_seen {
         host.pad_seen = pad;
         match pad {
@@ -676,12 +904,14 @@ fn update(
     if let Some(send) = &host.send {
         let job = Job::Step {
             epoch: host.epoch,
-            dt: time.delta_secs().min(0.1),
-            input,
             aspect,
             boosts: profession::Boosts {
                 rocket,
-                ..profession::Boosts::from_auras(auras)
+                ..profession::Boosts::from_auras(
+                    auras,
+                    profession.speed(),
+                    profession.camera_preset(),
+                )
             },
         };
         if send.send(job).is_err() {
@@ -695,7 +925,10 @@ fn start(
     collide: &WorldCollision,
     player: &crate::player::Player,
     aspect: f32,
+    boosts: profession::Boosts,
+    park: (&crate::park::ParkWorld, &crate::park::ParkScene),
     host: &mut Host,
+    offboard: bool,
 ) {
     if host.send.is_none() {
         let Some(root) = assets_root() else {
@@ -703,9 +936,10 @@ fn start(
             return;
         };
         match spawn_worker(root) {
-            Ok((send, receive)) => {
+            Ok((send, receive, input)) => {
                 host.send = Some(send);
-                host.receive = Some(Mutex::new(receive));
+                host.receive = Some(receive);
+                host.input = Some(input);
             }
             Err(e) => {
                 warn!("skate worker: {e}");
@@ -718,7 +952,11 @@ fn start(
     host.origin = player.pos;
     host.centre = player.pos;
     host.gathered_at = time.elapsed_secs();
-    let triangles = gather(collide, player.pos, host.origin);
+    host.geometry_revision = host.geometry_revision.wrapping_add(1);
+    host.park_revision = park.0.generation;
+    let triangles = gather(collide, player.pos, host.origin, park.1);
+    let (props, rails) =
+        crate::park::authored_collision(park.0, player.pos, GATHER_HALF, host.origin);
     info!(
         "skate: {} collision triangles around {:?}",
         triangles.len(),
@@ -729,21 +967,53 @@ fn start(
     if let Some(send) = &host.send {
         let _ = send.send(Job::Activate {
             epoch: host.epoch,
-            triangles,
+            collision: CollisionInput {
+                world: triangles,
+                props,
+                rails,
+                revision: host.geometry_revision,
+            },
             spawn: to_skate(player.pos + Vec3::Y * 0.1, host.origin),
             heading,
             aspect,
+            boosts,
+            offboard,
         });
     }
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SkateInputSet;
+
 pub(crate) fn plugin(app: &mut App) {
+    flag::plugin(app);
     app.init_resource::<Host>()
         .init_resource::<SkateDrive>()
         .init_resource::<SkatePose>()
         .init_resource::<board::Board>()
         .init_resource::<sound::SkateAudio>()
         .init_resource::<score::SkateScore>()
+        .init_resource::<profession::SpeedSetting>()
+        .init_resource::<profession::CameraSetting>()
+        .net_handler(
+            benilla_protocol::SessionEventKind::Chat,
+            profession::on_setting,
+        )
+        .net_handler(
+            benilla_protocol::SessionEventKind::Disconnected,
+            profession::reset_settings,
+        )
+        .net_handler(
+            benilla_protocol::SessionEventKind::Disconnected,
+            leave_world,
+        )
+        .net_handler(benilla_protocol::SessionEventKind::LoggedOut, leave_world)
+        .net_handler(
+            benilla_protocol::SessionEventKind::TransferPending,
+            leave_world,
+        )
+        .net_handler(benilla_protocol::SessionEventKind::Worldport, leave_world)
+        .net_handler(benilla_protocol::SessionEventKind::Teleport, leave_world)
         .net_handler(
             benilla_protocol::SessionEventKind::XpGain,
             score::on_xp_gain,
@@ -753,6 +1023,7 @@ pub(crate) fn plugin(app: &mut App) {
             Update,
             (update, board::update, sound::update, score::draw)
                 .chain()
+                .in_set(SkateInputSet)
                 .in_set(WorldStage::Input)
                 .before(crate::player::PlayerControlSet)
                 .in_set(crate::char_select::InWorldGated),

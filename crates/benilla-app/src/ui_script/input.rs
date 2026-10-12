@@ -96,8 +96,16 @@ pub(super) fn feed_ui_input(
     layout: Res<crate::bindings::LayoutNames>,
     // The uiScale dial folded into the seam scale.
     ui_scale: Res<super::UiScaleCvar>,
+    park: Option<Res<crate::park::ParkEditor>>,
 ) {
     let (keyboard, keys, capture, clipboard) = (&mut kbd.0, &kbd.1, &mut kbd.2, &mut kbd.3);
+    if park.as_ref().is_some_and(|park| park.active) {
+        keyboard.clear();
+        capture.typing = true;
+        capture.consumed.clear();
+        pointer.click_consumed.0 = true;
+        return;
+    }
     let world_pick = pointer.world_pick();
     // The OS pointer is not ours while a probe drives a gesture through the real pointer path or a
     // capture pins it: skip the mouse half whole, else-arm included, whose `pointer_left_window`

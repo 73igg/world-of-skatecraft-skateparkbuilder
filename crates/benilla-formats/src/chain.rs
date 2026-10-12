@@ -17,6 +17,7 @@ pub struct ChainEntry {
 }
 
 /// A priority-ordered patch chain of MPQ archives (`Send + Sync`; reads are `&self` and lock-free).
+#[derive(Clone)]
 pub struct Chain {
     /// Ascending priority: later archives win.
     archives: Vec<Archive>,

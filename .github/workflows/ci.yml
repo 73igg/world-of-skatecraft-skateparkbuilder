@@ -1,6 +1,6 @@
 # The gates of scripts/gates.sh that need neither a WoW install nor a display, on Linux, for a pull
 # request from a fork: a red one is seen before anyone builds it. A Windows job checks the game
-# still compiles there (World of Skatecraft has no Windows setup yet). The data-gated tests and a
+# still compiles there. The data-gated tests and a
 # live run happen on the maintainer's machine before it lands.
 name: CI
 
@@ -38,9 +38,11 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Prepare skate camera host
+        run: python3 setup/prepare_skate_engine.py
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: fmt
-        run: cargo fmt --all -- --check
+        run: python3 scripts/format_workspace.py --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
@@ -66,6 +68,8 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Prepare skate camera host
+        run: python setup/prepare_skate_engine.py
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: setup.ps1 parses
         shell: powershell

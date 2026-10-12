@@ -84,6 +84,13 @@ pub(crate) fn config_path() -> Option<PathBuf> {
     home().map(|h| h.join("config.toml"))
 }
 
+/// Private converted models and metadata for the park catalog, outside both game installs.
+pub(crate) fn park_assets_dir() -> Option<PathBuf> {
+    std::env::var_os("WOW_PARK_ASSETS")
+        .map(PathBuf::from)
+        .or_else(|| home().map(|h| h.join("park-assets")))
+}
+
 /// `benilla-config/macros/account.txt`: the account-wide macro tab (indices 1..=18).
 pub(crate) fn macros_account_path() -> Option<PathBuf> {
     home().map(|h| h.join("macros/account.txt"))

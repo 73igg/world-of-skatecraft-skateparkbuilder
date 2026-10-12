@@ -172,14 +172,19 @@ impl Plugin for DebugPanelPlugin {
 /// `process_output_system` logs an ERROR every frame a context has none. The first feed is a real
 /// `Context::run`, because tessellating a context that never began a pass panics `No fonts loaded`.
 fn feed_gated_egui_output(
-    mut contexts: Query<(&mut EguiContext, &mut EguiFullOutput, &EguiContextSettings)>,
+    mut contexts: Query<(
+        Entity,
+        &mut EguiContext,
+        &mut EguiFullOutput,
+        &EguiContextSettings,
+    )>,
     // The empty pass's output minus its one-time texture delta, fed on every later gated frame
     // instead of running a real pass.
-    mut cached: Local<Option<egui::FullOutput>>,
+    mut cached: Local<std::collections::HashMap<Entity, egui::FullOutput>>,
 ) {
-    for (mut ctx, mut full_output, settings) in &mut contexts {
+    for (entity, mut ctx, mut full_output, settings) in &mut contexts {
         if settings.run_manually && full_output.0.is_none() {
-            full_output.0 = Some(match &*cached {
+            let mut output = match cached.get(&entity) {
                 Some(out) => out.clone(),
                 None => {
                     // `get_mut`: `get` needs bevy_egui's `immutable_ctx` feature. The font
@@ -188,10 +193,12 @@ fn feed_gated_egui_output(
                     let mut keep = out.clone();
                     keep.textures_delta = Default::default();
                     keep.shapes.clear();
-                    *cached = Some(keep);
+                    cached.insert(entity, keep);
                     out
                 }
-            });
+            };
+            output.pixels_per_point = ctx.get_mut().pixels_per_point();
+            full_output.0 = Some(output);
         }
     }
 }

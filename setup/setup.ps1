@@ -177,7 +177,8 @@ if (-not (Test-Path $Compose)) {
     # The example's `user:` lines only matter on Linux hosts; its time zone stays UTC.
     Copy-Item (Join-Path $Server 'compose.yaml.example') $Compose
 }
-if (-not (Test-Path (Join-Path $Server 'storage\mangosd\extracted-data\maps'))) {
+if (-not (Test-Path (Join-Path $Server 'storage\mangosd\extracted-data\maps')) -and
+    -not (Test-Path (Join-Path $Server 'storage\mangosd\play-data\maps'))) {
     Step 'Extracting server maps from your WoW client (this takes HOURS; leave it running)'
     Invoke-Native 'pulling the server images' { Invoke-Compose pull --quiet }
     $WowDir = (Get-Item $WowLink).Target | Select-Object -First 1
@@ -188,6 +189,8 @@ if (-not (Test-Path (Join-Path $Server 'storage\mangosd\extracted-data\maps'))) 
             -v "${Extracted}:/opt/vmangos/storage/extracted-data" $ServerImage extract-client-data
     }
 }
+Step 'Building the server with the Skatecraft mod'
+Invoke-Native 'building the patched server' { python (Join-Path $Root 'setup\build_server.py') $Server }
 Step 'Starting the server'
 Invoke-Native 'starting the server' { Invoke-Compose up -d }
 Write-Host -NoNewline '  waiting for the world server'
@@ -211,9 +214,18 @@ if (-not (Test-Path $AccountFile)) {
 
 # ── Build ──────────────────────────────────────────────────────────────────────────────────────
 Step 'Building the game (first time: several minutes)'
+Invoke-Native 'preparing the skate camera host' { python (Join-Path $Root 'setup\prepare_skate_engine.py') }
 Invoke-Native 'the build' { cargo build --release -p benilla }
 
 Step 'Done'
 Write-Host '  Start the game with:  play.bat'
-Write-Host "  Log in as $((Get-Content $AccountFile -Raw).Trim()), create a character, press J to skate (Xbox controller)."
+$PlayerFile = Join-Path $State 'player-account.json'
+if (Test-Path $PlayerFile) {
+    $Player = Get-Content $PlayerFile -Raw | ConvertFrom-Json
+    if ($Player.character) { Write-Host "  Your character $($Player.character) loads automatically. Press J to skate." }
+    else { Write-Host '  Login is automatic. Create a character, then press J to skate.' }
+} else {
+    Write-Host "  Log in as $((Get-Content $AccountFile -Raw).Trim()), create a character, press J to skate."
+}
+if (Test-Path (Join-Path $State 'steam-game.json')) { Write-Host '  PlayStation controller support is configured through Steam Input.' }
 Stop-Transcript | Out-Null
