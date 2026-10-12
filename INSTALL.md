@@ -90,7 +90,7 @@ setup issues (see the README).
 2. Clone to a short path (long paths can break the build) and run setup:
 
    ```bat
-   git clone https://github.com/73igg/world-of-skatecraft-skatebuilder.git C:\skatecraft
+   git clone https://github.com/73igg/world-of-skatecraft-skateparkbuilder.git C:\skatecraft
    cd C:\skatecraft
    setup.bat
    ```

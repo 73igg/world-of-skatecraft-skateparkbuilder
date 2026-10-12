@@ -1,4 +1,4 @@
-# World of Skatecraft — Skatebuilder
+# World of Skatecraft — Skatepark Builder
 
 This fork adds a shared Skatepark Builder, persistent personal return flags, six new abilities,
 and speed, physics, camera and controller improvements to
@@ -111,7 +111,7 @@ powerslides and bails, anywhere in Azeroth. Your own character does the tricks, 
 Skateboarding is a profession: land tricks to level it, earn experience and unlock skate abilities
 such as Rocket Boost and Moon Jump.
 
-This is [73igg's fork](https://github.com/73igg/world-of-skatecraft-skatebuilder) of
+This is [73igg's fork](https://github.com/73igg/world-of-skatecraft-skateparkbuilder) of
 [Kimmo3223's World of Skatecraft](https://github.com/Kimmo3223/world-of-skatecraft), with the
 shared Park Builder, searchable object catalog, speed and camera controls, controller input
 improvements, camera collision fixes, and persistent personal return flags.
@@ -145,15 +145,15 @@ fully offline against a local server.
 Linux:
 
 ```sh
-git clone https://github.com/73igg/world-of-skatecraft-skatebuilder.git
-cd world-of-skatecraft-skatebuilder
+git clone https://github.com/73igg/world-of-skatecraft-skateparkbuilder.git
+cd world-of-skatecraft-skateparkbuilder
 setup/setup.sh
 ```
 
 Windows (experimental): install [Git](https://git-scm.com), then in a terminal:
 
 ```bat
-git clone https://github.com/73igg/world-of-skatecraft-skatebuilder.git C:\skatecraft
+git clone https://github.com/73igg/world-of-skatecraft-skateparkbuilder.git C:\skatecraft
 cd C:\skatecraft
 setup.bat
 ```
