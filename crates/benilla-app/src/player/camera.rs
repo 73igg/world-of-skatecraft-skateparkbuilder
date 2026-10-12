@@ -531,6 +531,8 @@ impl PivotGlide {
 /// channels. `pub(crate)` so [`crate::cursor`] can hide the cursor while looking.
 #[derive(Resource, Default)]
 pub(crate) struct CameraControl {
+    /// `control` handed this frame's eye to Skate; the final pass runs only for that owner.
+    pub(super) skate_seated: bool,
     /// Third-person orbit distance (yd), gliding toward `target_distance`.
     pub(super) distance: f32,
     pub(super) target_distance: f32,

@@ -4,6 +4,11 @@
 you know what to expect. If a step fails, setup stops, says what to fix, and continues from that
 step when you run it again.
 
+A fresh clone initializes a fresh server. No developer characters, accounts, passwords, saved
+flags, or database dumps are included. Setup creates the required databases and asks you to
+create your own game account. The mod's additional tables are initialized by source code,
+without importing anyone else's player records.
+
 ## 1. Before you start
 
 You need:
@@ -66,8 +71,9 @@ Afterwards, start the game with `./play.sh`.
 
 ## 5. Windows (experimental)
 
-The Windows setup does the same steps as the Linux one, but nobody has run it on a real Windows
-PC yet. If you try it, please post how it went in Discussions (see the README).
+The Windows setup uses Docker Desktop and the Visual Studio C++ tools. This fork is developed
+on Windows and builds the patched server from source before starting it. Please report any
+setup issues (see the README).
 
 1. Install the tools. In a terminal (PowerShell or Command Prompt):
 
@@ -84,7 +90,7 @@ PC yet. If you try it, please post how it went in Discussions (see the README).
 2. Clone to a short path (long paths can break the build) and run setup:
 
    ```bat
-   git clone https://github.com/Kimmo3223/world-of-skatecraft.git C:\skatecraft
+   git clone https://github.com/73igg/world-of-skatecraft-skateparkbuilder.git C:\skatecraft
    cd C:\skatecraft
    setup.bat
    ```

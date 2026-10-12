@@ -343,10 +343,19 @@ mod tests {
         score.observe(10.0, 120.0, "Ollie", None);
         score.observe(10.5, 0.0, "", None);
         assert_eq!(shown(&score, 10.6, None).expect("bail").trick.0, "BAIL");
-        assert_eq!(score.observe(20.0, 2000.0, "ID_TRICK_DARKSLIDE", None), None);
-        assert_eq!(score.observe(20.05, 300.0, "ID_TRICK_DARKSLIDE", None), None);
+        assert_eq!(
+            score.observe(20.0, 2000.0, "ID_TRICK_DARKSLIDE", None),
+            None
+        );
+        assert_eq!(
+            score.observe(20.05, 300.0, "ID_TRICK_DARKSLIDE", None),
+            None
+        );
         assert_eq!(shown(&score, 20.05, None).expect("live").points.0, "2,000");
         assert_eq!(score.observe(20.1, 0.0, "", Some(120.0)), Some(2000.0));
-        assert_eq!(shown(&score, 20.2, None).expect("landed").trick.0, "Darkslide");
+        assert_eq!(
+            shown(&score, 20.2, None).expect("landed").trick.0,
+            "Darkslide"
+        );
     }
 }

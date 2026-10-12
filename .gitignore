@@ -51,3 +51,70 @@ __pycache__/
 # Setup's log and scratch.
 /setup.log
 /.setup/
+# Local morph reference generated from client display data and the private server database.
+/morph.txt
+
+# Source-only fork: game formats, media, generated models and executables are never published.
+*.mpq
+*.MPQ
+*.xex
+*.iso
+*.big
+*.rx2
+*.blp
+*.BLP
+*.m2
+*.M2
+*.wmo
+*.WMO
+*.adt
+*.wdt
+*.wdl
+*.dbc
+*.map
+*.vmap
+*.vmtree
+*.vmtile
+*.mmap
+*.mmtile
+*.glb
+*.gltf
+*.fbx
+*.obj
+*.dds
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.wav
+*.ogg
+*.mp3
+*.xma
+*.fsb
+*.exe
+*.dll
+*.pdb
+*.zip
+*.7z
+*.log
+*.pem
+*.key
+.env
+.env.*
+*.sql
+*.sqlite
+*.db
+/Data/
+/Interface/
+/WTF/
+/Cache/
+/World of Warcraft*/
+/Skate 3/
+
+# Explicitly approved README documentation; all other game/media assets remain excluded.
+!docs/media/skatebuilder.mp4
+!docs/media/skatebuilder-preview.png
+!docs/media/respawn-flag.mp4
+!docs/media/respawn-flag-preview.png
+!docs/media/new-abilities.png

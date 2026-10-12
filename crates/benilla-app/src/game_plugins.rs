@@ -125,6 +125,7 @@ impl PluginGroup for GamePlugins {
             .add(PlayerPlugin)
             // Skate 3 mode (`J`), ahead of `control`, which drives the body from it while riding.
             .add(crate::skate::plugin)
+            .add(crate::park::plugin)
             .add(crate::screen_fade::ScreenFadePlugin)
             // After PlayerPlugin, whose `control` it overrides in the same stage.
             .add(CinematicPlugin)

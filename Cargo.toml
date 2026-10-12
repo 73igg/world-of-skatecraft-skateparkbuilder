@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = [".setup/skate-camera-engine/skate/crates/skate-host"]
 
 [workspace.package]
 version = "0.2.0"

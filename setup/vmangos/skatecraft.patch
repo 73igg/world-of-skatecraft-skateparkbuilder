@@ -1,25 +1,31 @@
 diff --git a/src/game/CMakeLists.txt b/src/game/CMakeLists.txt
-index 4352b9f..4b8c728 100644
+index 4352b9f8..a21cf818 100644
 --- a/src/game/CMakeLists.txt
 +++ b/src/game/CMakeLists.txt
-@@ -19,6 +19,7 @@ set (game_SRCS
+@@ -19,6 +19,9 @@ set (game_SRCS
      AccountMgr.cpp
      AuraRemovalMgr.cpp
      AutoBroadCastMgr.cpp
 +    Skatecraft.cpp
++    SkateFlag.cpp
++    ParkObjects.cpp
      Camera.cpp
      Conditions.cpp
      CreatureGroups.cpp
-@@ -252,6 +253,7 @@ set (game_SRCS
+@@ -252,6 +255,11 @@ set (game_SRCS
      AccountMgr.h
      AuraRemovalMgr.h
      AutoBroadCastMgr.h
 +    Skatecraft.h
++    SkateFlag.h
++    SkateFlagCore.h
++    ParkObjects.h
++    ParkObjectsCore.h
      Camera.h
      ClientDefines.h
      Conditions.h
 diff --git a/src/game/Database/DBCStores.cpp b/src/game/Database/DBCStores.cpp
-index e0d6401..baa8893 100644
+index e0d6401a..baa88933 100644
 --- a/src/game/Database/DBCStores.cpp
 +++ b/src/game/Database/DBCStores.cpp
 @@ -25,6 +25,7 @@
@@ -39,7 +45,7 @@ index e0d6401..baa8893 100644
      // error checks
      if (badDbcFiles.size() >= DBCFilesCount)
 diff --git a/src/game/Handlers/CharacterHandler.cpp b/src/game/Handlers/CharacterHandler.cpp
-index cdabf42..a013c4f 100644
+index cdabf420..a013c4f2 100644
 --- a/src/game/Handlers/CharacterHandler.cpp
 +++ b/src/game/Handlers/CharacterHandler.cpp
 @@ -29,6 +29,7 @@
@@ -59,41 +65,735 @@ index cdabf42..a013c4f 100644
          pCurrChar->SendInitWorldStates(pCurrChar->GetCachedZoneId());
  
 diff --git a/src/game/Handlers/ChatHandler.cpp b/src/game/Handlers/ChatHandler.cpp
-index 47f576d..2004e85 100644
+index 47f576dd..15455d40 100644
 --- a/src/game/Handlers/ChatHandler.cpp
 +++ b/src/game/Handlers/ChatHandler.cpp
-@@ -40,6 +40,7 @@
+@@ -40,6 +40,8 @@
  #include "CellImpl.h"
  #include "Anticheat.h"
  #include "AccountMgr.h"
 +#include "Skatecraft.h"
++#include "ParkObjects.h"
  
  bool WorldSession::SanitizeChatMessage(std::string& msg, uint32 lang, uint32 msgType)
  {
-@@ -156,6 +157,9 @@ void WorldSession::HandleChatMessageOpcode(WorldPackets::Chat::ChatMessage const
+@@ -156,6 +158,9 @@ void WorldSession::HandleChatMessageOpcode(WorldPackets::Chat::ChatMessage const
          return;
      }
  
-+    if (packet.lang == LANG_ADDON && _player && Skatecraft::HandleAddonMessage(_player, packet.message))
++    if (packet.lang == LANG_ADDON && _player && (ParkObjects::Handle(_player, packet.message) || Skatecraft::HandleAddonMessage(_player, packet.message)))
 +        return;
 +
      if (!IsLanguageAllowedForChatType(packet.lang, packet.type))
      {
          sLog.Out(LOG_BASIC, LOG_LVL_ERROR, "CHAT: Wrong language %u received for chat type %u.", packet.lang, packet.type);
+diff --git a/src/game/ObjectMgr.cpp b/src/game/ObjectMgr.cpp
+index b6b842a0..db6361ba 100644
+--- a/src/game/ObjectMgr.cpp
++++ b/src/game/ObjectMgr.cpp
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include "ObjectMgr.h"
++#include "Skatecraft.h"
+ #include "Database/DatabaseEnv.h"
+ #include "Database/DatabaseImpl.h"
+ #include "Database/SQLStorageImpl.h"
+@@ -4734,6 +4735,15 @@ void ObjectMgr::LoadPlayerInfo()
+         }
+     }
+ 
++    // Skate abilities use the same starting-spell lists as Attack and Shoot.
++    for (uint32 race = 1; race < MAX_RACES; ++race)
++        for (uint32 playerClass = 1; playerClass < MAX_CLASSES; ++playerClass)
++        {
++            PlayerInfo& info = m_PlayerInfo[race][playerClass];
++            if (info.displayId_m && info.displayId_f)
++                Skatecraft::AddDefaultSpells(info);
++        }
++
+     // Load playercreateinfo_action
+     {
+         //                                                               0       1        2         3         4
+diff --git a/src/game/Objects/Player.cpp b/src/game/Objects/Player.cpp
+index c45726eb..2464e216 100644
+--- a/src/game/Objects/Player.cpp
++++ b/src/game/Objects/Player.cpp
+@@ -24,6 +24,7 @@
+ #include <sstream>
+ 
+ #include "Player.h"
++#include "Skatecraft.h"
+ #include "Bag.h"
+ #include "Language.h"
+ #include "Database/DatabaseEnv.h"
+@@ -521,6 +522,7 @@ bool Player::Create(uint32 guidlow, std::string const& name, uint8 race, uint8 c
+ 
+     // original spells
+     LearnDefaultSpells();
++    Skatecraft::InitializePlayer(this);
+ 
+     // Phasing
+     SetWorldMask(WORLD_DEFAULT_CHAR);
+@@ -4468,6 +4470,7 @@ void Player::DeleteFromDB(ObjectGuid playerGuid, uint32 accountId, bool updateRe
+             CharacterDatabase.PExecute("DELETE FROM `character_queststatus` WHERE `guid` = '%u'", lowGuid);
+             CharacterDatabase.PExecute("DELETE FROM `character_reputation` WHERE `guid` = '%u'", lowGuid);
+             CharacterDatabase.PExecute("DELETE FROM `character_skills` WHERE `guid` = '%u'", lowGuid);
++            Skatecraft::OnDelete(lowGuid);
+             CharacterDatabase.PExecute("DELETE FROM `character_forgotten_skills` WHERE `guid` = '%u'", lowGuid);
+             CharacterDatabase.PExecute("DELETE FROM `character_spell` WHERE `guid` = '%u'", lowGuid);
+             CharacterDatabase.PExecute("DELETE FROM `character_spell_cooldown` WHERE `guid` = '%u'", lowGuid);
+diff --git a/src/game/ParkObjects.cpp b/src/game/ParkObjects.cpp
+new file mode 100644
+index 00000000..98e1eca5
+--- /dev/null
++++ b/src/game/ParkObjects.cpp
+@@ -0,0 +1,134 @@
++#include "ParkObjects.h"
++#include "ParkObjectsCore.h"
++#include "Player.h"
++#include "WorldSession.h"
++#include "World.h"
++#include "Chat.h"
++#include "Timer.h"
++#include <mutex>
++#include <memory>
++
++namespace ParkObjects
++{
++    using namespace ParkCore;
++    struct PendingEdit { Edit value;bool received=false;std::vector<bool> parts; };
++    struct PendingDrop { Drop value;bool received=false; };
++    struct Transaction { uint32_t request=0,map=0,instance=0,started=0;size_t parts=0;std::vector<PendingEdit> edits;std::vector<PendingDrop> drops; };
++    struct Client { uint64_t owner=0;uint32_t map=0,instance=0,lastSync=0;bool ready=false;std::unique_ptr<Transaction> transaction; };
++    static std::recursive_mutex s_lock;
++    static Store s_store;
++    static std::unordered_map<WorldSession*,Client> s_clients;
++    static uint32_t s_snapshot=0;
++    static uint64_t Token(WorldSession* session) { return uint64_t(reinterpret_cast<uintptr_t>(session)); }
++    static void Send(Player* player,Bytes const& bytes)
++    {
++        std::string text=Encode(bytes);WorldPacket packet;
++        ChatHandler::BuildChatPacket(packet,CHAT_MSG_WHISPER,text.c_str(),LANG_ADDON,CHAT_TAG_NONE,player->GetObjectGuid(),nullptr,player->GetObjectGuid());
++        player->GetSession()->SendPacket(&packet);
++    }
++    static void Reject(Player* player,uint32_t request,uint8_t reason) {Bytes bytes{VERSION,9};U32(bytes,request);bytes.push_back(reason);Send(player,bytes);}
++    static void Broadcast(uint32_t map,uint32_t instance,Bytes const& bytes)
++    {
++        for(auto const& client:s_clients)
++        {
++            Player* player=client.first->GetPlayer();
++            if(client.second.ready && player && player->IsInWorld() && player->GetMapId()==map && player->GetInstanceId()==instance)Send(player,bytes);
++        }
++    }
++    static void SendObject(Player* player,ParkCore::Object const& object,uint32_t request,uint16_t slot=0)
++    {
++        Send(player,ObjectMessage(object,request,slot));for(uint16_t index=0;index<object.parts.size();++index)Send(player,PartMessage(object,index));
++    }
++    static void Changes(uint32_t map,uint32_t instance,uint64_t owner,uint32_t request,std::vector<ParkCore::Object> const& changed,std::vector<ParkCore::Object> const& removed)
++    {
++        Bytes begin{VERSION,17};U32(begin,request);U64(begin,owner);U16(begin,uint16_t(changed.size()));U16(begin,uint16_t(removed.size()));Broadcast(map,instance,begin);
++        for(auto const& object:removed) {Bytes bytes{VERSION,7};U32(bytes,request);U64(bytes,object.owner);U32(bytes,object.id);Broadcast(map,instance,bytes);}
++        for(uint16_t slot=0;slot<changed.size();++slot)
++        {
++            auto const& object=changed[slot];Broadcast(map,instance,ObjectMessage(object,request,slot));
++            for(uint16_t index=0;index<object.parts.size();++index)Broadcast(map,instance,PartMessage(object,index));
++        }
++        Bytes end{VERSION,19};U32(end,request);U64(end,owner);Broadcast(map,instance,end);
++    }
++    static void Snapshot(Player* player,Client& client)
++    {
++        client.map=player->GetMapId();client.instance=player->GetInstanceId();client.lastSync=WorldTimer::getMSTime();
++        auto objects=s_store.Snapshot(client.map,client.instance);uint32_t snapshot=++s_snapshot;
++        Bytes begin{VERSION,4};U32(begin,snapshot);U32(begin,client.map);U32(begin,client.instance);U16(begin,uint16_t(objects.size()));Send(player,begin);
++        for(auto const& object:objects)SendObject(player,object,0);
++        Bytes end{VERSION,6};U32(end,snapshot);Send(player,end);client.ready=true;
++    }
++    static bool Stage(Player* player,Client& client,Request const& request)
++    {
++        if(request.kind==12)
++        {
++            if(client.transaction)Reject(player,client.transaction->request,6);
++            client.transaction.reset(new Transaction);auto& tx=*client.transaction;
++            tx.request=request.request;tx.map=player->GetMapId();tx.instance=player->GetInstanceId();tx.started=WorldTimer::getMSTime();tx.edits.resize(request.edits);tx.drops.resize(request.drops);return true;
++        }
++        auto fail=[&](uint8_t reason) {Reject(player,request.request,reason);client.transaction.reset();return true;};
++        if(!client.transaction || client.transaction->request!=request.request)return fail(6);
++        auto& tx=*client.transaction;
++        if(tx.map!=player->GetMapId() || tx.instance!=player->GetInstanceId())return fail(5);
++        if(request.kind==13)
++        {
++            if(request.slot>=tx.edits.size())return fail(1);auto& edit=tx.edits[request.slot];
++            if(edit.received)return fail(1);
++            tx.parts+=request.parts?request.parts:1;if(tx.parts>OWNER_PART_LIMIT)return fail(4);
++            edit.received=true;edit.value.id=request.id;edit.value.revision=request.revision;edit.value.model=request.model;edit.value.asset=request.asset;edit.value.pose=request.pose;edit.value.parts.resize(request.parts);edit.parts.resize(request.parts,false);return true;
++        }
++        if(request.kind==14)
++        {
++            if(request.slot>=tx.edits.size())return fail(1);auto& edit=tx.edits[request.slot];
++            if(!edit.received || request.index>=edit.parts.size() || edit.parts[request.index])return fail(1);
++            edit.parts[request.index]=true;edit.value.parts[request.index]=request.part;return true;
++        }
++        if(request.kind==15)
++        {
++            if(request.slot>=tx.drops.size() || tx.drops[request.slot].received)return fail(1);
++            tx.drops[request.slot].received=true;tx.drops[request.slot].value={request.id,request.revision};return true;
++        }
++        std::vector<Edit> edits;std::vector<Drop> drops;
++        for(auto const& edit:tx.edits) {if(!edit.received)return fail(1);for(bool received:edit.parts)if(!received)return fail(1);edits.push_back(edit.value);}
++        for(auto const& drop:tx.drops) {if(!drop.received)return fail(1);drops.push_back(drop.value);}
++        std::vector<ParkCore::Object> changed,removed;
++        uint8_t reason=s_store.Apply(client.owner,Token(player->GetSession()),tx.map,tx.instance,edits,drops,changed,removed);
++        uint32_t map=tx.map,instance=tx.instance;client.transaction.reset();
++        if(reason) {Reject(player,request.request,reason);return true;}
++        Changes(map,instance,client.owner,request.request,changed,removed);return true;
++    }
++    void Advertise(Player* player) { Bytes bytes{VERSION,11};U32(bytes,CATALOG);Send(player,bytes); }
++    void Toggle(Player* player) { Send(player,Bytes{VERSION,10}); }
++    bool Handle(Player* player,std::string const& text)
++    {
++        if(text.compare(0,sizeof(PREFIX)-1,PREFIX)!=0)return false;
++        Request request;if(!Parse(text,request))return true;
++        std::lock_guard<std::recursive_mutex> guard(s_lock);WorldSession* session=player->GetSession();
++        auto& client=s_clients[session];client.owner=player->GetObjectGuid().GetRawValue();
++        if(!player->IsInWorld())return true;
++        if(request.kind==0 || request.kind==3) {if(!client.ready || WorldTimer::getMSTimeDiff(client.lastSync,WorldTimer::getMSTime())>=250)Snapshot(player,client);return true;}
++        if(!client.ready)return true;
++        if(request.kind>=12)return Stage(player,client,request);
++        ParkCore::Object object;
++        uint8_t reason=request.kind==1?s_store.Put(client.owner,Token(session),player->GetMapId(),player->GetInstanceId(),request,object):s_store.Delete(client.owner,Token(session),request,object);
++        if(reason) {Reject(player,request.request,reason);return true;}
++        if(request.kind==1)Changes(object.map,object.instance,client.owner,request.request,{object},{});
++        else Changes(object.map,object.instance,client.owner,request.request,{}, {object});
++        return true;
++    }
++    void RemoveSession(WorldSession* session)
++    {
++        std::lock_guard<std::recursive_mutex> guard(s_lock);auto removed=s_store.RemoveSession(Token(session));s_clients.erase(session);
++        for(auto const& object:removed) {Bytes bytes{VERSION,7};U32(bytes,0);U64(bytes,object.owner);U32(bytes,object.id);Broadcast(object.map,object.instance,bytes);}
++    }
++    void Update()
++    {
++        std::lock_guard<std::recursive_mutex> guard(s_lock);
++        for(auto& item:s_clients)
++        {
++            Player* player=item.first->GetPlayer();auto& client=item.second;
++            if(client.transaction && WorldTimer::getMSTimeDiff(client.transaction->started,WorldTimer::getMSTime())>5000) {if(player)Reject(player,client.transaction->request,6);client.transaction.reset();}
++            if(player && player->IsInWorld() && (client.map!=player->GetMapId() || client.instance!=player->GetInstanceId())) {if(client.transaction) {Reject(player,client.transaction->request,5);client.transaction.reset();}Snapshot(player,client);}
++        }
++    }
++}
+diff --git a/src/game/ParkObjects.h b/src/game/ParkObjects.h
+new file mode 100644
+index 00000000..a001923b
+--- /dev/null
++++ b/src/game/ParkObjects.h
+@@ -0,0 +1,14 @@
++#ifndef SKATECRAFT_PARK_OBJECTS_H
++#define SKATECRAFT_PARK_OBJECTS_H
++#include <string>
++class Player;
++class WorldSession;
++namespace ParkObjects
++{
++    void Advertise(Player* player);
++    void Toggle(Player* player);
++    bool Handle(Player* player,std::string const& text);
++    void RemoveSession(WorldSession* session);
++    void Update();
++}
++#endif
+diff --git a/src/game/ParkObjectsCore.h b/src/game/ParkObjectsCore.h
+new file mode 100644
+index 00000000..506dc671
+--- /dev/null
++++ b/src/game/ParkObjectsCore.h
+@@ -0,0 +1,234 @@
++#ifndef SKATECRAFT_PARK_OBJECTS_CORE_H
++#define SKATECRAFT_PARK_OBJECTS_CORE_H
++
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <cstring>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++namespace ParkCore
++{
++    constexpr char PREFIX[] = "SKATEBUILD\t";
++    constexpr uint8_t VERSION = 3;
++    constexpr uint32_t CATALOG = 3;
++    constexpr size_t OWNER_LIMIT = 256;
++    constexpr size_t MAP_LIMIT = 2048;
++    constexpr size_t PART_LIMIT = 256;
++    constexpr size_t OWNER_PART_LIMIT = 1024;
++    constexpr size_t MAP_PART_LIMIT = 8192;
++    inline bool ValidAsset(uint8_t model,uint64_t asset) {return model==8 ? (asset>>62)>=1 && (asset>>62)<=2 : asset==0;}
++    struct Part
++    {
++        uint8_t model=1;
++        uint64_t asset=0;
++        std::array<float,12> affine{{1,0,0,0,1,0,0,0,1,0,0,0}};
++        bool Valid() const
++        {
++            if(model<1 || model>8 || model==7 || !ValidAsset(model,asset))return false;
++            for(float value:affine)if(!std::isfinite(value) || std::abs(value)>1000000.f)return false;
++            auto const& a=affine;
++            double det=double(a[0])*(double(a[4])*a[8]-double(a[5])*a[7])-double(a[3])*(double(a[1])*a[8]-double(a[2])*a[7])+double(a[6])*(double(a[1])*a[5]-double(a[2])*a[4]);
++            return std::isfinite(det) && det>1e-18;
++        }
++    };
++    struct Pose
++    {
++        std::array<float, 10> numbers{{0,0,0,0,0,0,1,1,1,1}};
++        bool Valid() const
++        {
++            for (float value : numbers) if (!std::isfinite(value)) return false;
++            for (size_t i=0;i<3;++i) if (std::abs(numbers[i])>100000.f) return false;
++            float norm=0;
++            for (size_t i=3;i<7;++i) norm+=numbers[i]*numbers[i];
++            if (norm<0.999f || norm>1.001f) return false;
++            for (size_t i=7;i<10;++i) if (numbers[i]<0.01f || numbers[i]>100.f) return false;
++            return true;
++        }
++    };
++    struct Object
++    {
++        uint64_t owner=0, session=0;
++        uint32_t id=0, revision=1, map=0, instance=0;
++        uint8_t model=1;
++        uint64_t asset=0;
++        Pose pose;
++        std::vector<Part> parts;
++    };
++    struct Request
++    {
++        uint8_t kind=0, model=1;
++        uint64_t asset=0;
++        uint32_t request=0, id=0, revision=0;
++        Pose pose;
++        uint16_t slot=0,index=0,edits=0,drops=0,parts=0;
++        Part part;
++    };
++    using Bytes=std::vector<uint8_t>;
++    inline void U16(Bytes& bytes,uint16_t value) {bytes.push_back(uint8_t(value));bytes.push_back(uint8_t(value>>8));}
++    inline void U32(Bytes& bytes,uint32_t value) { for(unsigned i=0;i<4;++i) bytes.push_back(uint8_t(value>>(i*8))); }
++    inline void U64(Bytes& bytes,uint64_t value) { for(unsigned i=0;i<8;++i) bytes.push_back(uint8_t(value>>(i*8))); }
++    inline void Transform(Bytes& bytes,Pose const& pose)
++    {
++        for (float value:pose.numbers) { uint32_t bits;std::memcpy(&bits,&value,4);U32(bytes,bits); }
++    }
++    inline std::string Encode(Bytes const& bytes)
++    {
++        static char const alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++        std::string result=PREFIX;
++        for(size_t i=0;i<bytes.size();i+=3)
++        {
++            size_t left=bytes.size()-i;
++            uint32_t value=(uint32_t(bytes[i])<<16)|(left>1?uint32_t(bytes[i+1])<<8:0)|(left>2?uint32_t(bytes[i+2]):0);
++            result+=alphabet[value>>18];result+=alphabet[(value>>12)&63];
++            result+=left>1?alphabet[(value>>6)&63]:'=';result+=left>2?alphabet[value&63]:'=';
++        }
++        return result;
++    }
++    inline bool Decode(std::string const& text,Bytes& bytes)
++    {
++        static std::string const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++        size_t prefix=sizeof(PREFIX)-1;
++        if(text.compare(0,prefix,PREFIX)!=0)return false;
++        size_t length=text.size()-prefix;
++        if(!length || length%4 || length>172)return false;
++        for(size_t at=prefix;at<text.size();at+=4)
++        {
++            uint32_t value=0;unsigned padding=0;
++            for(unsigned i=0;i<4;++i)
++            {
++                value<<=6;
++                if(text[at+i]=='=') { if(i<2)return false;++padding; }
++                else { auto index=alphabet.find(text[at+i]);if(padding || index==std::string::npos)return false;value|=uint32_t(index); }
++            }
++            if((padding && at+4!=text.size()) || padding>2 || (padding==1 && (value&255)) || (padding==2 && (value&65535)))return false;
++            bytes.push_back(uint8_t(value>>16));if(padding<2)bytes.push_back(uint8_t(value>>8));if(!padding)bytes.push_back(uint8_t(value));
++        }
++        return bytes.size()<=128;
++    }
++    inline uint32_t Read32(Bytes const& bytes,size_t at)
++    {
++        return uint32_t(bytes[at])|(uint32_t(bytes[at+1])<<8)|(uint32_t(bytes[at+2])<<16)|(uint32_t(bytes[at+3])<<24);
++    }
++    inline uint64_t Read64(Bytes const& bytes,size_t at) {return uint64_t(Read32(bytes,at)) | (uint64_t(Read32(bytes,at+4))<<32);}
++    inline uint16_t Read16(Bytes const& bytes,size_t at) {return uint16_t(bytes[at])|(uint16_t(bytes[at+1])<<8);}
++    inline bool Parse(std::string const& text,Request& request)
++    {
++        Bytes bytes;if(!Decode(text,bytes) || bytes.size()<2 || bytes[0]!=VERSION)return false;
++        request.kind=bytes[1];
++        if(request.kind==0)return bytes.size()==6 && Read32(bytes,2)==CATALOG;
++        if(request.kind==3)return bytes.size()==2;
++        if(request.kind>=12 && request.kind<=16)
++        {
++            if(bytes.size()<6)return false;
++            request.request=Read32(bytes,2);if(!request.request)return false;
++            if(request.kind==12) {if(bytes.size()!=10)return false;request.edits=Read16(bytes,6);request.drops=Read16(bytes,8);return request.edits<=OWNER_LIMIT && request.drops<=OWNER_LIMIT && (request.edits || request.drops);}
++            if(request.kind==16)return bytes.size()==6;
++            if(bytes.size()<8)return false;
++            request.slot=Read16(bytes,6);if(request.slot>=OWNER_LIMIT)return false;
++            if(request.kind==15) {if(bytes.size()!=16)return false;request.id=Read32(bytes,8);request.revision=Read32(bytes,12);return request.id && request.revision;}
++            if(bytes.size()!=67)return false;
++            if(request.kind==14) {
++                request.index=Read16(bytes,8);request.part.model=bytes[10];request.part.asset=Read64(bytes,11);
++                for(size_t i=0;i<12;++i) {uint32_t bits=Read32(bytes,19+i*4);std::memcpy(&request.part.affine[i],&bits,4);}
++                return request.index<PART_LIMIT && request.part.Valid();
++            }
++            request.id=Read32(bytes,8);request.revision=Read32(bytes,12);request.model=bytes[16];request.asset=Read64(bytes,17);request.parts=Read16(bytes,65);
++            for(size_t i=0;i<10;++i) {uint32_t bits=Read32(bytes,25+i*4);std::memcpy(&request.pose.numbers[i],&bits,4);}
++            return ((request.id==0)==(request.revision==0)) && request.model>=1 && request.model<=8 && ValidAsset(request.model,request.asset) && request.parts<=PART_LIMIT && ((request.model==7)==(request.parts>0)) && request.pose.Valid();
++        }
++        if(request.kind!=1 && request.kind!=2)return false;
++        if(bytes.size()!=(request.kind==1?63:14))return false;
++        request.request=Read32(bytes,2);request.id=Read32(bytes,6);request.revision=Read32(bytes,10);
++        if(!request.request || ((request.id==0)!=(request.revision==0)))return false;
++        if(request.kind==2)return request.id!=0;
++        request.model=bytes[14];request.asset=Read64(bytes,15);if(!ValidAsset(request.model,request.asset) || request.model<1 || request.model>8 || (request.model==7 && request.id==0))return false;
++        for(size_t i=0;i<10;++i) { uint32_t bits=Read32(bytes,23+i*4);std::memcpy(&request.pose.numbers[i],&bits,4); }
++        return request.pose.Valid();
++    }
++    inline Bytes ObjectMessage(Object const& object,uint32_t request,uint16_t slot=0)
++    {
++        Bytes bytes{VERSION,5};U32(bytes,request);U64(bytes,object.owner);U32(bytes,object.id);U32(bytes,object.revision);U32(bytes,object.map);U32(bytes,object.instance);bytes.push_back(object.model);U64(bytes,object.asset);Transform(bytes,object.pose);U16(bytes,uint16_t(object.parts.size()));U16(bytes,slot);return bytes;
++    }
++    inline Bytes PartMessage(Object const& object,uint16_t index)
++    {
++        Bytes bytes{VERSION,18};U64(bytes,object.owner);U32(bytes,object.id);U32(bytes,object.revision);U16(bytes,index);auto const& part=object.parts[index];bytes.push_back(part.model);U64(bytes,part.asset);
++        for(float value:part.affine) {uint32_t bits;std::memcpy(&bits,&value,4);U32(bytes,bits);}return bytes;
++    }
++    struct Edit {uint32_t id=0,revision=0;uint8_t model=1;uint64_t asset=0;Pose pose;std::vector<Part> parts;};
++    struct Drop {uint32_t id=0,revision=0;};
++    struct Store
++    {
++        std::unordered_map<uint32_t,Object> objects;
++        uint32_t nextId=1;
++        // Identity and revisions are checked before mutation. Objects retain their original map.
++        uint8_t Put(uint64_t owner,uint64_t session,uint32_t map,uint32_t instance,Request const& request,Object& result)
++        {
++            if(!request.pose.Valid() || request.model<1 || request.model>8 || !ValidAsset(request.model,request.asset) || (request.model==7 && !request.id))return 1;
++            Edit edit;edit.id=request.id;edit.revision=request.revision;edit.model=request.model;edit.asset=request.asset;edit.pose=request.pose;
++            if(request.model==7)
++            {
++                auto found=objects.find(request.id);if(found==objects.end())return 3;
++                edit.parts=found->second.parts;
++            }
++            std::vector<Object> changed,removed;uint8_t error=Apply(owner,session,map,instance,{edit},{},changed,removed);
++            if(!error)result=changed[0];
++            return error;
++        }
++        uint8_t Delete(uint64_t owner,uint64_t session,Request const& request,Object& result)
++        {
++            auto found=objects.find(request.id);if(found==objects.end())return 3;
++            if(found->second.owner!=owner || found->second.session!=session)return 5;
++            if(found->second.revision!=request.revision)return 2;
++            result=found->second;objects.erase(found);return 0;
++        }
++        std::vector<Object> RemoveSession(uint64_t session)
++        {
++            std::vector<Object> removed;
++            for(auto it=objects.begin();it!=objects.end();) { if(it->second.session==session) { removed.push_back(it->second);it=objects.erase(it); } else ++it; }
++            return removed;
++        }
++        std::vector<Object> Snapshot(uint32_t map,uint32_t instance) const
++        {
++            std::vector<Object> result;for(auto const& item:objects)if(item.second.map==map && item.second.instance==instance)result.push_back(item.second);return result;
++        }
++        uint8_t Apply(uint64_t owner,uint64_t session,uint32_t map,uint32_t instance,std::vector<Edit> const& edits,std::vector<Drop> const& drops,std::vector<Object>& changed,std::vector<Object>& removed)
++        {
++            if(edits.size()>OWNER_LIMIT || drops.size()>OWNER_LIMIT || (edits.empty() && drops.empty()))return 1;
++            std::unordered_set<uint32_t> touched;
++            auto check=[&](uint32_t id,uint32_t revision)->uint8_t {
++                if(!id || !touched.insert(id).second)return 1;
++                auto found=objects.find(id);if(found==objects.end())return 3;
++                auto const& o=found->second;
++                if(o.owner!=owner || o.session!=session || o.map!=map || o.instance!=instance)return 5;
++                if(o.revision!=revision || revision==UINT32_MAX)return 2;
++                return 0;
++            };
++            uint64_t reserved=nextId;
++            std::vector<Object> nextChanged,nextRemoved;
++            for(auto const& drop:drops) {if(uint8_t error=check(drop.id,drop.revision))return error;nextRemoved.push_back(objects.at(drop.id));}
++            for(auto const& edit:edits)
++            {
++                if(!edit.pose.Valid() || edit.model<1 || edit.model>8 || !ValidAsset(edit.model,edit.asset) || edit.parts.size()>PART_LIMIT || ((edit.model==7)!=!edit.parts.empty()))return 1;
++                for(auto const& part:edit.parts)if(!part.Valid())return 1;
++                Object object;
++                if(edit.id) {if(uint8_t error=check(edit.id,edit.revision))return error;object=objects.at(edit.id);++object.revision;}
++                else {if(edit.revision || !reserved || reserved>UINT32_MAX)return 4;object.id=uint32_t(reserved++);object.owner=owner;object.session=session;object.map=map;object.instance=instance;}
++                object.model=edit.model;object.asset=edit.asset;object.pose=edit.pose;object.parts=edit.parts;nextChanged.push_back(std::move(object));
++            }
++            size_t owned=0,inMap=0,ownParts=0,mapParts=0;
++            auto count=[&](Object const& o) {size_t parts=o.parts.empty()?1:o.parts.size();if(o.session==session) {++owned;ownParts+=parts;}if(o.map==map && o.instance==instance) {++inMap;mapParts+=parts;}};
++            for(auto const& item:objects)if(!touched.count(item.first))count(item.second);
++            for(auto const& object:nextChanged)count(object);
++            if(owned>OWNER_LIMIT || inMap>MAP_LIMIT || ownParts>OWNER_PART_LIMIT || mapParts>MAP_PART_LIMIT)return 4;
++            // Every identity, revision and limit has passed; mutation begins only here.
++            for(uint32_t id:touched)objects.erase(id);
++            for(auto const& object:nextChanged)objects.emplace(object.id,object);
++            nextId=uint32_t(reserved);changed=std::move(nextChanged);removed=std::move(nextRemoved);return 0;
++        }
++    };
++}
++#endif
+diff --git a/src/game/Server/WorldSession.cpp b/src/game/Server/WorldSession.cpp
+index 8c54d5be..329d4663 100644
+--- a/src/game/Server/WorldSession.cpp
++++ b/src/game/Server/WorldSession.cpp
+@@ -26,6 +26,7 @@
+ #include "Opcodes.h"
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
++#include "ParkObjects.h"
+ #include "Player.h"
+ #include "ObjectMgr.h"
+ #include "Group.h"
+@@ -85,6 +86,7 @@ WorldSession::WorldSession(uint32 id, std::shared_ptr<WorldSocket> sock, Account
+ // WorldSession destructor
+ WorldSession::~WorldSession()
+ {
++    ParkObjects::RemoveSession(this);
+     // unload player if not unloaded
+     if (_player)
+         LogoutPlayer(!m_bot || sPlayerBotMgr.IsSavingAllowed());
+@@ -482,6 +484,7 @@ bool WorldSession::Update(PacketFilter& updater)
+         // Cleanup socket pointer if needed
+         if (m_socket && m_socket->IsClosing())
+         {
++            ParkObjects::RemoveSession(this);
+             m_socket->FinalizeSession();
+             m_socket = nullptr;
+ 
+@@ -672,6 +675,7 @@ bool WorldSession::UpdateDisconnected(uint32 diff)
+ // %Log the player out
+ void WorldSession::LogoutPlayer(bool Save)
+ {
++    ParkObjects::RemoveSession(this);
+     // finish pending transfers before starting the logout
+     /* while(_player && _player->IsBeingTeleportedFar())
+         HandleMoveWorldportAckOpcode(); */
+diff --git a/src/game/SkateFlag.cpp b/src/game/SkateFlag.cpp
+new file mode 100644
+index 00000000..8a07fcdf
+--- /dev/null
++++ b/src/game/SkateFlag.cpp
+@@ -0,0 +1,101 @@
++#include "SkateFlag.h"
++#include "SkateFlagCore.h"
++#include "Skatecraft.h"
++#include "Player.h"
++#include "Map.h"
++#include "MapManager.h"
++#include "Database/DBCStores.h"
++#include "WorldSession.h"
++#include "Chat.h"
++#include "Timer.h"
++#include <mutex>
++#include <unordered_map>
++
++namespace SkateFlag {
++    using SkateFlagCore::Flag;
++    static std::recursive_mutex s_lock;
++    static bool s_ready=false;
++    static std::unordered_map<uint32,uint32> s_lastAction;
++
++    static void Send(Player* player,std::string const& body) {
++        std::string text=SkateFlagCore::PREFIX+body;WorldPacket packet;
++        ChatHandler::BuildChatPacket(packet,CHAT_MSG_WHISPER,text.c_str(),LANG_ADDON,CHAT_TAG_NONE,
++            player->GetObjectGuid(),nullptr,player->GetObjectGuid());
++        player->GetSession()->SendPacket(&packet);
++    }
++    static void Reject(Player* player,uint32 request,uint8 reason,char const* notice) {
++        Send(player,"E\t"+std::to_string(request)+"\t"+std::to_string(reason));
++        if(notice)ChatHandler(player).SendSysMessage(notice);
++    }
++    static Flag Load(Player* player) {
++        Flag f;
++        if(s_ready)if(auto result=CharacterDatabase.PQuery("SELECT revision,map,instance,zone,x,y,z,facing FROM character_skatecraft_flag WHERE guid=%u",player->GetGUIDLow())) {
++            Field* row=result->Fetch();f.revision=row[0].GetUInt64();f.map=row[1].GetUInt32();f.instance=row[2].GetUInt32();f.zone=row[3].GetUInt32();
++            f.position={row[4].GetFloat(),row[5].GetFloat(),row[6].GetFloat()};f.facing=row[7].GetFloat();
++            if(!SkateFlagCore::Valid(f))f=Flag{};
++        }
++        return f;
++    }
++    static void Snapshot(Player* player,uint32 request) {
++        Flag f=Load(player);Send(player,"F\t"+std::to_string(request)+"\t"+(f.revision?SkateFlagCore::Fields(f):"0"));
++    }
++    void InitializeStorage() {
++        std::lock_guard<std::recursive_mutex> lock(s_lock);
++        s_ready=CharacterDatabase.DirectExecute("CREATE TABLE IF NOT EXISTS character_skatecraft_flag ("
++            "guid INT UNSIGNED NOT NULL PRIMARY KEY,revision BIGINT UNSIGNED NOT NULL,"
++            "map INT UNSIGNED NOT NULL,instance INT UNSIGNED NOT NULL,zone INT UNSIGNED NOT NULL,"
++            "x DOUBLE NOT NULL,y DOUBLE NOT NULL,z DOUBLE NOT NULL,facing DOUBLE NOT NULL)");
++        if(!s_ready)sLog.Out(LOG_BASIC,LOG_LVL_ERROR,"Skatecraft: unable to initialize persistent return flags.");
++    }
++    void OnLogin(Player* player) {std::lock_guard<std::recursive_mutex> lock(s_lock);Snapshot(player,0);}
++    void OnDelete(uint32 guid) {
++        std::lock_guard<std::recursive_mutex> lock(s_lock);
++        if(s_ready)CharacterDatabase.PExecute("DELETE FROM character_skatecraft_flag WHERE guid=%u",guid);
++        s_lastAction.erase(guid);
++    }
++    bool Handle(Player* player,std::string const& message) {
++        if(message.compare(0,10,"SKATEFLAG\t")!=0)return false;
++        std::lock_guard<std::recursive_mutex> lock(s_lock);
++        SkateFlagCore::Request request;
++        if(!SkateFlagCore::Decode(message,request)) {Reject(player,0,1,nullptr);return true;}
++        if(!s_ready) {Reject(player,request.request,8,"Saved skate flags are currently unavailable.");return true;}
++        if(request.kind=='H') {Snapshot(player,0);return true;}
++        if(!player->IsInWorld()||!player->IsAlive()||!player->HasAura(Skatecraft::SPELL_SUMMON_SKATEBOARD)
++            ||player->IsBeingTeleported()||player->GetTransport()) {
++            Reject(player,request.request,2,"Use your flag while you are in Skate mode.");return true;
++        }
++        uint32 now=WorldTimer::getMSTime();uint32& last=s_lastAction[player->GetGUIDLow()];
++        if(last&&WorldTimer::getMSTimeDiff(last,now)<300) {Reject(player,request.request,3,"Wait a moment before using the flag again.");return true;}
++        last=now;
++        if(request.kind=='S') {
++            if(!MaNGOS::IsValidMapCoord(request.position[0],request.position[1],request.position[2],request.facing)
++                ||player->GetDistance(request.position[0],request.position[1],request.position[2])>2.f) {
++                Reject(player,request.request,4,"Your position changed before the flag could be saved. Try again.");return true;
++            }
++            Flag before=Load(player);
++            if(before.revision==UINT64_MAX) {Reject(player,request.request,8,"Your flag could not be saved.");return true;}
++            if(!CharacterDatabase.DirectPExecute("INSERT INTO character_skatecraft_flag (guid,revision,map,instance,zone,x,y,z,facing) "
++                "VALUES (%u,%llu,%u,%u,%u,%.9g,%.9g,%.9g,%.9g) ON DUPLICATE KEY UPDATE revision=revision+1,"
++                "map=VALUES(map),instance=VALUES(instance),zone=VALUES(zone),x=VALUES(x),y=VALUES(y),z=VALUES(z),facing=VALUES(facing)",
++                player->GetGUIDLow(),static_cast<unsigned long long>(before.revision+1),player->GetMapId(),player->GetInstanceId(),player->GetZoneId(),
++                double(request.position[0]),double(request.position[1]),double(request.position[2]),double(request.facing))) {
++                Reject(player,request.request,8,"Your flag could not be saved. The previous flag is still kept.");return true;
++            }
++            Snapshot(player,request.request);ChatHandler(player).SendSysMessage("Skate flag saved. Tap Select to return holding your board.");return true;
++        }
++        Flag flag=Load(player);
++        if(!flag.revision) {Reject(player,request.request,6,"Hold Select to place a skate flag first.");return true;}
++        if(flag.revision!=request.revision) {Snapshot(player,0);Reject(player,request.request,5,"Your saved flag changed. Try returning again.");return true;}
++        if(flag.instance && (flag.map!=player->GetMapId()||flag.instance!=player->GetInstanceId())) {
++            Reject(player,request.request,7,"That flag is inside an instance you are not currently in. Its position is still saved.");return true;
++        }
++        if(!sMapStorage.LookupEntry<MapEntry>(flag.map)||!MaNGOS::IsValidMapCoord(flag.position[0],flag.position[1],flag.position[2],flag.facing)) {
++            Reject(player,request.request,7,"The saved flag destination is unavailable. Its position is still saved.");return true;
++        }
++        bool seamless=flag.map==player->GetMapId()&&flag.instance==player->GetInstanceId()&&flag.zone==player->GetZoneId();
++        Send(player,"T\t"+std::to_string(request.request)+"\t"+(seamless?"1\t":"0\t")+SkateFlagCore::Fields(flag));
++        if(!player->TeleportTo(flag.map,flag.position[0],flag.position[1],flag.position[2],flag.facing))
++            Reject(player,request.request,7,"Unable to return to that flag right now. Its position is still saved.");
++        return true;
++    }
++}
+diff --git a/src/game/SkateFlag.h b/src/game/SkateFlag.h
+new file mode 100644
+index 00000000..a0d6abe9
+--- /dev/null
++++ b/src/game/SkateFlag.h
+@@ -0,0 +1,11 @@
++#ifndef SKATE_FLAG_H
++#define SKATE_FLAG_H
++#include "Common.h"
++class Player;
++namespace SkateFlag {
++    void InitializeStorage();
++    void OnLogin(Player* player);
++    void OnDelete(uint32 guid);
++    bool Handle(Player* player,std::string const& message);
++}
++#endif
+diff --git a/src/game/SkateFlagCore.h b/src/game/SkateFlagCore.h
+new file mode 100644
+index 00000000..5cf72d34
+--- /dev/null
++++ b/src/game/SkateFlagCore.h
+@@ -0,0 +1,66 @@
++#ifndef SKATE_FLAG_CORE_H
++#define SKATE_FLAG_CORE_H
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <cstdlib>
++#include <iomanip>
++#include <limits>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace SkateFlagCore
++{
++    constexpr char PREFIX[] = "SKATEFLAG\t1\t";
++    struct Flag {
++        uint64_t revision=0;
++        uint32_t map=0,instance=0,zone=0;
++        std::array<float,3> position{};
++        float facing=0;
++    };
++    struct Request {
++        char kind=0;
++        uint32_t request=0;
++        uint64_t revision=0;
++        std::array<float,3> position{};
++        float facing=0;
++    };
++    inline bool Unsigned(std::string const& text,uint64_t maximum,uint64_t& out) {
++        if(text.empty())return false;
++        out=0;
++        for(char c:text) { if(c<'0'||c>'9'||out>(maximum-uint64_t(c-'0'))/10)return false;out=out*10+uint64_t(c-'0'); }
++        return true;
++    }
++    inline bool Number(std::string const& text,float& out) {
++        if(text.empty())return false;
++        for(char c:text)if(!((c>='0'&&c<='9')||c=='+'||c=='-'||c=='.'||c=='e'||c=='E'))return false;
++        char* end=nullptr;out=std::strtof(text.c_str(),&end);
++        return end==text.c_str()+text.size()&&std::isfinite(out);
++    }
++    inline bool Valid(Flag const& f) {
++        return f.revision&&std::isfinite(f.facing)&&f.facing>=0&&f.facing<6.28318530718f
++            &&std::isfinite(f.position[0])&&std::isfinite(f.position[1])&&std::isfinite(f.position[2]);
++    }
++    inline bool Decode(std::string const& message,Request& out) {
++        if(message.size()>255||message.compare(0,sizeof(PREFIX)-1,PREFIX)!=0)return false;
++        std::vector<std::string> fields;std::string body=message.substr(sizeof(PREFIX)-1);
++        size_t start=0;
++        for(size_t i=0;i<=body.size();++i)if(i==body.size()||body[i]=='\t') {fields.push_back(body.substr(start,i-start));start=i+1;}
++        out=Request{};
++        if(fields.size()==1&&fields[0]=="H") {out.kind='H';return true;}
++        uint64_t n=0;
++        if(fields.size()<2||!Unsigned(fields[1],UINT32_MAX,n)||!n)return false;
++        out.request=uint32_t(n);
++        if(fields.size()==3&&fields[0]=="R"&&Unsigned(fields[2],UINT64_MAX,out.revision)) {out.kind='R';return true;}
++        if(fields.size()==6&&fields[0]=="S"&&Number(fields[2],out.position[0])&&Number(fields[3],out.position[1])
++            &&Number(fields[4],out.position[2])&&Number(fields[5],out.facing)&&out.facing>=0&&out.facing<6.28318530718f) {out.kind='S';return true;}
++        return false;
++    }
++    inline std::string Fields(Flag const& f) {
++        std::ostringstream s;s.imbue(std::locale::classic());s<<std::setprecision(std::numeric_limits<float>::max_digits10)
++            <<f.revision<<'\t'<<f.map<<'\t'<<f.instance<<'\t'<<f.zone<<'\t'<<f.position[0]<<'\t'<<f.position[1]<<'\t'<<f.position[2]<<'\t'<<f.facing;
++        return s.str();
++    }
++}
++#endif
 diff --git a/src/game/Skatecraft.cpp b/src/game/Skatecraft.cpp
 new file mode 100644
-index 0000000..b34bca5
+index 00000000..ec1d439a
 --- /dev/null
 +++ b/src/game/Skatecraft.cpp
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,434 @@
 +#include "Skatecraft.h"
++#include "SkateFlag.h"
++#include "ParkObjects.h"
 +#include "Database/DBCStores.h"
 +#include "Chat.h"
 +#include "Player.h"
 +#include "SpellMgr.h"
 +#include "Timer.h"
++#include "WorldSession.h"
++#include "ObjectMgr.h"
 +
 +#include <cstdlib>
++#include <limits>
 +#include <unordered_map>
 +
 +extern SkillRaceClassInfoMap SkillRaceClassInfoBySkill;
@@ -106,6 +806,9 @@ index 0000000..b34bca5
 +    constexpr uint32 ICON_FLARE        = 136;
 +    constexpr uint32 ICON_SPRINT       = 516;
 +    constexpr uint32 ICON_MOONGLOW     = 46;
++    constexpr uint32 ICON_ARROW_UP     = 60006;
++    constexpr uint32 ICON_ARROW_DOWN   = 60007;
++    constexpr uint32 ICON_CAMERA       = 60010;
 +
 +    // A skill tier of one 300 step, so the skill keeps its own max rather than following level.
 +    constexpr uint32 SKILL_TIER_300 = 181;
@@ -116,14 +819,15 @@ index 0000000..b34bca5
 +    // A reported line is clamped to this many points.
 +    constexpr float MAX_LINE_POINTS = 100000.f;
 +
-+    struct Unlock { uint32 skill; uint32 spell; };
-+    constexpr Unlock UNLOCKS[] = {
-+        {   1, SPELL_SUMMON_SKATEBOARD },
-+        {  75, SPELL_OLLIE_BOOST },
-+        { 150, SPELL_ROCKET_BOOST },
-+        { 225, SPELL_SPEED_DEMON },
-+        { 300, SPELL_MOON_JUMP },
++    constexpr uint32 ABILITIES[] = {
++        SPELL_SUMMON_SKATEBOARD, SPELL_OLLIE_BOOST, SPELL_ROCKET_BOOST,
++        SPELL_SPEED_DEMON, SPELL_MOON_JUMP, SPELL_SPEED_UP, SPELL_SPEED_DOWN,
++        SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER,
 +    };
++    constexpr uint16 DEFAULT_CAMERA_STEPS = 8; // half steps: 4.0 times engine framing
++    constexpr uint16 DEFAULT_SPEED_STEPS = 3; // half steps: 1.5 times stock
++    constexpr float SPEED_DEMON_MULTIPLIER = 1.6f;
++    constexpr float STOCK_PUSH_SPEED = 8.5f; // m/s from Skate 3's physics_push/MaxPushableSpeed
 +
 +    static char s_skillName[] = "Skateboarding";
 +    static char s_empty[] = "";
@@ -131,6 +835,12 @@ index 0000000..b34bca5
 +    static SkillRaceClassInfoEntry s_raceClass;
 +
 +    static std::unordered_map<uint32, uint32> s_lastLine; // player guid low -> ms
++    static std::unordered_map<uint32, uint16> s_speedSteps;
++    static bool s_speedStorageReady = false;
++    static std::unordered_map<uint32, uint16> s_cameraSteps;
++    static bool s_cameraStorageReady = false;
++    static std::unordered_map<uint32, uint8> s_cameraPresets;
++    static bool s_presetStorageReady = false;
 +
 +    void LoadSkillLine()
 +    {
@@ -180,29 +890,257 @@ index 0000000..b34bca5
 +
 +    void LoadSpells()
 +    {
++        SkateFlag::InitializeStorage();
 +        // SpellCastTimes.dbc: 1 instant, 16 1.5 s. SpellDuration.dbc: 21 until cancelled, 2 30 s, 18 20 s, 36 1 s.
 +        AddSpell(SPELL_SUMMON_SKATEBOARD, "Summon Skateboard", ICON_MECHASTRIDER, 16, 21, 0, true);
 +        AddSpell(SPELL_OLLIE_BOOST, "Ollie Boost", ICON_BOOTS, 1, 2, 2 * MINUTE * IN_MILLISECONDS, true);
 +        AddSpell(SPELL_ROCKET_BOOST, "Rocket Boost", ICON_FLARE, 1, 36, 30 * IN_MILLISECONDS, true);
 +        AddSpell(SPELL_SPEED_DEMON, "Speed Demon", ICON_SPRINT, 1, 2, 3 * MINUTE * IN_MILLISECONDS, true);
 +        AddSpell(SPELL_MOON_JUMP, "Moon Jump", ICON_MOONGLOW, 1, 18, 5 * MINUTE * IN_MILLISECONDS, true);
++        AddSpell(SPELL_SPEED_UP, "Increase Skate Speed", ICON_ARROW_UP, 1, 0, 0, false);
++        AddSpell(SPELL_SPEED_DOWN, "Decrease Skate Speed", ICON_ARROW_DOWN, 1, 0, 0, false);
++        AddSpell(SPELL_CAMERA_DISTANCE_UP, "Increase Skate Camera Distance", ICON_ARROW_UP, 1, 0, 0, false);
++        AddSpell(SPELL_CAMERA_DISTANCE_DOWN, "Decrease Skate Camera Distance", ICON_ARROW_DOWN, 1, 0, 0, false);
++        AddSpell(SPELL_CAMERA_PRESET, "Cycle Skate Camera Preset", ICON_CAMERA, 1, 0, 0, false);
++        AddSpell(SPELL_PARK_BUILDER, "Park Builder", ICON_CAMERA, 1, 0, 0, false);
++        for (uint32 id : {SPELL_SPEED_UP, SPELL_SPEED_DOWN, SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER})
++        {
++            SpellEntry* spell = const_cast<SpellEntry*>(sSpellMgr.GetSpellEntry(id));
++            spell->StartRecoveryCategory = 0;
++            spell->StartRecoveryTime = 0;
++        }
++        // The selected skate speed is a character preference, separate from WoW movement speed.
++        s_speedStorageReady = CharacterDatabase.DirectExecute(
++            "CREATE TABLE IF NOT EXISTS character_skatecraft_speed ("
++            "guid INT UNSIGNED NOT NULL PRIMARY KEY, "
++            "half_steps SMALLINT UNSIGNED NOT NULL DEFAULT 3)");
++        if (!s_speedStorageReady)
++            sLog.Out(LOG_BASIC, LOG_LVL_ERROR, "Skatecraft: unable to create skate speed preference storage.");
++        s_cameraStorageReady = CharacterDatabase.DirectExecute(
++            "CREATE TABLE IF NOT EXISTS character_skatecraft_camera ("
++            "guid INT UNSIGNED NOT NULL PRIMARY KEY, "
++            "half_steps SMALLINT UNSIGNED NOT NULL DEFAULT 8)");
++        if (!s_cameraStorageReady)
++            sLog.Out(LOG_BASIC, LOG_LVL_ERROR, "Skatecraft: unable to create skate camera preference storage.");
++        s_presetStorageReady = CharacterDatabase.DirectExecute(
++            "CREATE TABLE IF NOT EXISTS character_skatecraft_camera_preset ("
++            "guid INT UNSIGNED NOT NULL PRIMARY KEY, "
++            "preset TINYINT UNSIGNED NOT NULL DEFAULT 1)");
++        if (!s_presetStorageReady)
++            sLog.Out(LOG_BASIC, LOG_LVL_ERROR, "Skatecraft: unable to create camera preset preference storage.");
 +    }
 +
-+    static void LearnUnlocked(Player* player)
++    void AddDefaultSpells(PlayerInfo& info)
 +    {
-+        uint32 skill = player->GetSkillValueBase(SKILL_SKATEBOARDING);
-+        for (auto const& unlock : UNLOCKS)
-+            if (skill >= unlock.skill && !player->HasSpell(unlock.spell))
-+                player->LearnSpell(unlock.spell, false);
++        for (uint32 spell : ABILITIES)
++            if (std::find(info.spell.begin(), info.spell.end(), spell) == info.spell.end())
++                info.spell.push_back(spell);
 +    }
 +
-+    void OnLogin(Player* player)
++    void InitializePlayer(Player* player)
 +    {
 +        if (!sSkillLineStore.LookupEntry(SKILL_SKATEBOARDING))
 +            return;
 +        if (!player->HasSkill(SKILL_SKATEBOARDING))
 +            player->SetSkill(SKILL_SKATEBOARDING, 1, SKILL_MAX);
-+        LearnUnlocked(player);
++        for (uint32 spell : ABILITIES)
++            if (!player->HasSpell(spell))
++                player->LearnSpell(spell, false);
++    }
++
++    static uint16 LoadSpeed(Player* player)
++    {
++        uint16 steps = DEFAULT_SPEED_STEPS;
++        if (s_speedStorageReady)
++            if (auto result = CharacterDatabase.PQuery(
++                "SELECT half_steps FROM character_skatecraft_speed WHERE guid = %u", player->GetGUIDLow()))
++                steps = std::max<uint16>(1, result->Fetch()[0].GetUInt16());
++        s_speedSteps[player->GetGUIDLow()] = steps;
++        return steps;
++    }
++
++    static uint16 SpeedSteps(Player* player)
++    {
++        auto found = s_speedSteps.find(player->GetGUIDLow());
++        return found == s_speedSteps.end() ? LoadSpeed(player) : found->second;
++    }
++
++    static void SendSpeed(Player* player, bool announce)
++    {
++        uint16 steps = SpeedSteps(player);
++        std::string setting = "SKATECRAFT\tS\t" + std::to_string(steps);
++        WorldPacket packet;
++        ChatHandler::BuildChatPacket(packet, CHAT_MSG_WHISPER, setting.c_str(), LANG_ADDON,
++            CHAT_TAG_NONE, player->GetObjectGuid(), nullptr, player->GetObjectGuid());
++        player->GetSession()->SendPacket(&packet);
++        if (announce)
++        {
++            float selected = steps * 0.5f;
++            bool demon = player->HasAura(SPELL_SPEED_DEMON);
++            float effective = selected * (demon ? SPEED_DEMON_MULTIPLIER : 1.f);
++            ChatHandler(player).PSendSysMessage(
++                "Skate speed: %.1fx selected%s; %.1fx effective (%.1f mph / %.1f km/h push limit).",
++                selected, demon ? " + Speed Demon" : "", effective,
++                STOCK_PUSH_SPEED * effective * 2.2369363f, STOCK_PUSH_SPEED * effective * 3.6f);
++        }
++    }
++
++    static uint16 LoadCamera(Player* player)
++    {
++        uint16 steps = DEFAULT_CAMERA_STEPS;
++        if (s_cameraStorageReady)
++            if (auto result = CharacterDatabase.PQuery(
++                "SELECT half_steps FROM character_skatecraft_camera WHERE guid = %u", player->GetGUIDLow()))
++                steps = std::max<uint16>(1, result->Fetch()[0].GetUInt16());
++        s_cameraSteps[player->GetGUIDLow()] = steps;
++        return steps;
++    }
++
++    static uint16 CameraSteps(Player* player)
++    {
++        auto found = s_cameraSteps.find(player->GetGUIDLow());
++        return found == s_cameraSteps.end() ? LoadCamera(player) : found->second;
++    }
++
++    static void SendCamera(Player* player, bool announce)
++    {
++        uint16 steps = CameraSteps(player);
++        std::string setting = "SKATECRAFT\tC\t" + std::to_string(steps);
++        WorldPacket packet;
++        ChatHandler::BuildChatPacket(packet, CHAT_MSG_WHISPER, setting.c_str(), LANG_ADDON,
++            CHAT_TAG_NONE, player->GetObjectGuid(), nullptr, player->GetObjectGuid());
++        player->GetSession()->SendPacket(&packet);
++        if (announce)
++            ChatHandler(player).PSendSysMessage("Skate camera distance: %.1fx (engine framing).", steps * 0.5f);
++    }
++
++    static void AdjustCamera(Player* player, uint32 spell)
++    {
++        uint16 before = CameraSteps(player);
++        uint16 after = before;
++        if (spell == SPELL_CAMERA_DISTANCE_UP && before < std::numeric_limits<uint16>::max())
++            ++after;
++        else if (spell == SPELL_CAMERA_DISTANCE_DOWN && before > 1)
++            --after;
++        if (after != before)
++        {
++            if (!s_cameraStorageReady || !CharacterDatabase.DirectPExecute(
++                "INSERT INTO character_skatecraft_camera (guid, half_steps) VALUES (%u, %u) "
++                "ON DUPLICATE KEY UPDATE half_steps = VALUES(half_steps)", player->GetGUIDLow(), uint32(after)))
++            {
++                ChatHandler(player).SendSysMessage("Your skate camera distance could not be saved. Try again.");
++                return;
++            }
++            s_cameraSteps[player->GetGUIDLow()] = after;
++        }
++        SendCamera(player, true);
++    }
++
++    static uint8 LoadPreset(Player* player)
++    {
++        uint8 preset = 1; // native High; native Low is zero
++        if (s_presetStorageReady)
++            if (auto result = CharacterDatabase.PQuery(
++                "SELECT preset FROM character_skatecraft_camera_preset WHERE guid = %u", player->GetGUIDLow()))
++                preset = result->Fetch()[0].GetUInt8() == 0 ? 0 : 1;
++        s_cameraPresets[player->GetGUIDLow()] = preset;
++        return preset;
++    }
++
++    static uint8 Preset(Player* player)
++    {
++        auto found = s_cameraPresets.find(player->GetGUIDLow());
++        return found == s_cameraPresets.end() ? LoadPreset(player) : found->second;
++    }
++
++    static void SendPreset(Player* player, bool announce)
++    {
++        uint8 preset = Preset(player);
++        std::string setting = "SKATECRAFT\tP\t" + std::to_string(uint32(preset));
++        WorldPacket packet;
++        ChatHandler::BuildChatPacket(packet, CHAT_MSG_WHISPER, setting.c_str(), LANG_ADDON,
++            CHAT_TAG_NONE, player->GetObjectGuid(), nullptr, player->GetObjectGuid());
++        player->GetSession()->SendPacket(&packet);
++        if (announce)
++            ChatHandler(player).PSendSysMessage("Skate camera preset: %s.", preset == 0 ? "Low" : "High");
++    }
++
++    static void CyclePreset(Player* player)
++    {
++        uint8 next = Preset(player) == 0 ? 1 : 0;
++        if (!s_presetStorageReady || !CharacterDatabase.DirectPExecute(
++            "INSERT INTO character_skatecraft_camera_preset (guid, preset) VALUES (%u, %u) "
++            "ON DUPLICATE KEY UPDATE preset = VALUES(preset)", player->GetGUIDLow(), uint32(next)))
++        {
++            ChatHandler(player).SendSysMessage("Your skate camera preset could not be saved. Try again.");
++            return;
++        }
++        s_cameraPresets[player->GetGUIDLow()] = next;
++        SendPreset(player, true);
++    }
++
++    void OnLogin(Player* player)
++    {
++        InitializePlayer(player);
++        LoadSpeed(player);
++        SendSpeed(player, false);
++        LoadCamera(player);
++        SendCamera(player, false);
++        LoadPreset(player);
++        SendPreset(player, false);
++        SkateFlag::OnLogin(player);
++        ParkObjects::Advertise(player);
++    }
++
++    void OnSpellCast(Player* player, uint32 spell)
++    {
++        if (spell == SPELL_PARK_BUILDER) { ParkObjects::Toggle(player); return; }
++        if (spell == SPELL_CAMERA_PRESET)
++        {
++            CyclePreset(player);
++            return;
++        }
++        if (spell == SPELL_CAMERA_DISTANCE_UP || spell == SPELL_CAMERA_DISTANCE_DOWN)
++        {
++            AdjustCamera(player, spell);
++            return;
++        }
++        if (spell != SPELL_SPEED_UP && spell != SPELL_SPEED_DOWN &&
++            spell != SPELL_SPEED_DEMON && spell != SPELL_ROCKET_BOOST)
++            return;
++        uint16 before = SpeedSteps(player);
++        uint16 after = before;
++        if (spell == SPELL_SPEED_UP && before < std::numeric_limits<uint16>::max())
++            ++after;
++        else if (spell == SPELL_SPEED_DOWN && before > 1)
++            --after;
++        if (after != before)
++        {
++            if (!s_speedStorageReady || !CharacterDatabase.DirectPExecute(
++                "INSERT INTO character_skatecraft_speed (guid, half_steps) VALUES (%u, %u) "
++                "ON DUPLICATE KEY UPDATE half_steps = VALUES(half_steps)", player->GetGUIDLow(), uint32(after)))
++            {
++                ChatHandler(player).SendSysMessage("Your skate speed could not be saved. Try again.");
++                return;
++            }
++            s_speedSteps[player->GetGUIDLow()] = after;
++        }
++        SendSpeed(player, true);
++    }
++
++    void OnDelete(uint32 guid)
++    {
++        SkateFlag::OnDelete(guid);
++        if (s_speedStorageReady)
++            CharacterDatabase.PExecute("DELETE FROM character_skatecraft_speed WHERE guid = %u", guid);
++        if (s_cameraStorageReady)
++            CharacterDatabase.PExecute("DELETE FROM character_skatecraft_camera WHERE guid = %u", guid);
++        if (s_presetStorageReady)
++            CharacterDatabase.PExecute("DELETE FROM character_skatecraft_camera_preset WHERE guid = %u", guid);
++        s_cameraPresets.erase(guid);
++        s_cameraSteps.erase(guid);
++        s_speedSteps.erase(guid);
++        s_lastLine.erase(guid);
 +    }
 +
 +    // Points a line needs to raise the skill at `skill`.
@@ -231,7 +1169,6 @@ index 0000000..b34bca5
 +        if (gain && skill < SKILL_MAX)
 +        {
 +            player->SetSkill(SKILL_SKATEBOARDING, std::min(skill + gain, SKILL_MAX), SKILL_MAX);
-+            LearnUnlocked(player);
 +        }
 +
 +        // Character XP: a same-level kill for a line worth the skill, up to four for a big one.
@@ -243,6 +1180,7 @@ index 0000000..b34bca5
 +
 +    bool HandleAddonMessage(Player* player, std::string const& message)
 +    {
++        if (SkateFlag::Handle(player, message)) return true;
 +        static std::string const prefix = "SKATECRAFT\t";
 +        if (message.compare(0, prefix.size(), prefix) != 0)
 +            return false;
@@ -279,17 +1217,17 @@ index 0000000..b34bca5
 +}
 diff --git a/src/game/Skatecraft.h b/src/game/Skatecraft.h
 new file mode 100644
-index 0000000..a9bf703
+index 00000000..31193a32
 --- /dev/null
 +++ b/src/game/Skatecraft.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,59 @@
 +/*
 + * World of Skatecraft: Skateboarding, a secondary profession levelled by landing skate lines.
 + *
 + * The benilla client rides the Skate 3 engine and reports each landed line to us as an addon
 + * message ("SKATECRAFT\tL\t<points>"). We raise the Skateboarding skill, give character XP and
-+ * teach the skate abilities as the skill grows. The skill line and the spells live in code, so
-+ * the server needs no edited DBC files or database rows.
++ * teach all skate abilities at character creation and login. Speed and camera distance are saved per
++ * character; the skill line and spells live in code, without editing the game's DBC files.
 + */
 +
 +#ifndef SKATECRAFT_H
@@ -301,6 +1239,7 @@ index 0000000..a9bf703
 +class Player;
 +class Unit;
 +class SpellEntry;
++struct PlayerInfo;
 +
 +namespace Skatecraft
 +{
@@ -313,13 +1252,27 @@ index 0000000..a9bf703
 +    constexpr uint32 SPELL_ROCKET_BOOST      = 60003;
 +    constexpr uint32 SPELL_SPEED_DEMON       = 60004;
 +    constexpr uint32 SPELL_MOON_JUMP         = 60005;
++    constexpr uint32 SPELL_SPEED_UP          = 60006;
++    constexpr uint32 SPELL_SPEED_DOWN        = 60007;
++    constexpr uint32 SPELL_CAMERA_DISTANCE_UP   = 60008;
++    constexpr uint32 SPELL_CAMERA_DISTANCE_DOWN = 60009;
++    constexpr uint32 SPELL_CAMERA_PRESET        = 60010;
++    constexpr uint32 SPELL_PARK_BUILDER         = 60011;
 +
 +    // After the DBC stores load: the Skateboarding skill line and its race/class rule.
 +    void LoadSkillLine();
 +    // After spell_template loads: the skate spells.
 +    void LoadSpells();
-+    // On login: everyone can skate; abilities match the skill.
++    // Every legal race/class starts with the skate abilities alongside its stock spells.
++    void AddDefaultSpells(PlayerInfo& info);
++    // At character creation and login: everyone knows every skate ability.
++    void InitializePlayer(Player* player);
++    // On login: teach missing abilities and restore speed and camera distance.
 +    void OnLogin(Player* player);
++    // A successfully completed cast: speed and camera steps and status notices.
++    void OnSpellCast(Player* player, uint32 spell);
++    // Remove this preference when a character is permanently deleted.
++    void OnDelete(uint32 guid);
 +    // An addon message from the client; true when it was ours.
 +    bool HandleAddonMessage(Player* player, std::string const& message);
 +    // Extra cast checks for the skate spells; SPELL_CAST_OK otherwise.
@@ -328,7 +1281,7 @@ index 0000000..a9bf703
 +
 +#endif
 diff --git a/src/game/Spells/Spell.cpp b/src/game/Spells/Spell.cpp
-index eaaaaf1..abd1b5d 100644
+index eaaaaf15..ad8ab6eb 100644
 --- a/src/game/Spells/Spell.cpp
 +++ b/src/game/Spells/Spell.cpp
 @@ -20,6 +20,7 @@
@@ -339,7 +1292,16 @@ index eaaaaf1..abd1b5d 100644
  #include "Log.h"
  #include "Opcodes.h"
  #include "CharacterDatabaseCache.h"
-@@ -5301,6 +5302,13 @@ void Spell::RemoveChanneledAuraHolder(SpellAuraHolder* holder, AuraRemoveMode mo
+@@ -4335,6 +4336,8 @@ void Spell::finish(bool ok)
+ 
+     if (Player* pPlayer = m_caster->ToPlayer())
+     {
++        if (ok)
++            Skatecraft::OnSpellCast(pPlayer, m_spellInfo->Id);
+         if (!ok && pPlayer->GetClass() == CLASS_WARLOCK)
+         {
+             // Fix a client problem with ritual of doom, by itself it disables
+@@ -5301,6 +5304,13 @@ void Spell::RemoveChanneledAuraHolder(SpellAuraHolder* holder, AuraRemoveMode mo
  
  SpellCastResult Spell::CheckCast(bool strict)
  {
@@ -353,8 +1315,31 @@ index eaaaaf1..abd1b5d 100644
      if (m_caster->IsPlayer() && m_caster->ToPlayer()->HasCheatOption(PLAYER_CHEAT_NO_CHECK_CAST))
          return SPELL_CAST_OK;
  
+diff --git a/src/game/Spells/SpellEffects.cpp b/src/game/Spells/SpellEffects.cpp
+index 946b1987..ec5083ca 100644
+--- a/src/game/Spells/SpellEffects.cpp
++++ b/src/game/Spells/SpellEffects.cpp
+@@ -30,6 +30,7 @@
+ #include "SpellMgr.h"
+ #include "Player.h"
+ #include "Spell.h"
++#include "Skatecraft.h"
+ #include "DynamicObject.h"
+ #include "SpellAuras.h"
+ #include "Group.h"
+@@ -314,6 +315,10 @@ void Spell::EffectSchoolDMG(SpellEffectIndex effect_idx)
+ 
+ void Spell::EffectDummy(SpellEffectIndex effIdx)
+ {
++    // Skate preferences are applied once, after the complete cast succeeds.
++    if (m_spellInfo->Id == Skatecraft::SPELL_SPEED_UP || m_spellInfo->Id == Skatecraft::SPELL_SPEED_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_UP || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_PRESET)
++        return;
++
+     if (!unitTarget && !gameObjTarget && !itemTarget && !corpseTarget)
+         return;
+ 
 diff --git a/src/game/Spells/SpellMgr.h b/src/game/Spells/SpellMgr.h
-index 924cea0..1499d17 100644
+index 924cea08..1499d171 100644
 --- a/src/game/Spells/SpellMgr.h
 +++ b/src/game/Spells/SpellMgr.h
 @@ -715,6 +715,19 @@ class SpellMgr
@@ -378,18 +1363,19 @@ index 924cea0..1499d17 100644
          SpellEntry const*  OverwriteSpellEntry(uint32 id)
          {
 diff --git a/src/game/World.cpp b/src/game/World.cpp
-index ca0b522..ee84998 100644
+index ca0b5229..d4289569 100644
 --- a/src/game/World.cpp
 +++ b/src/game/World.cpp
-@@ -24,6 +24,7 @@
+@@ -24,6 +24,8 @@
  */
  
  #include "World.h"
++#include "ParkObjects.h"
 +#include "Skatecraft.h"
  #include "Database/DatabaseEnv.h"
  #include "Config/Config.h"
  #include "Platform/Define.h"
-@@ -1365,6 +1366,7 @@ void World::SetInitialWorldSettings()
+@@ -1365,6 +1367,7 @@ void World::SetInitialWorldSettings()
  
      sLog.Out(LOG_BASIC, LOG_LVL_MINIMAL, "Loading spells ...");
      sSpellMgr.LoadSpells();
@@ -397,8 +1383,16 @@ index ca0b522..ee84998 100644
  
      sObjectMgr.LoadFactions();
  
+@@ -2019,6 +2022,7 @@ void World::Update(uint32 diff)
+         // <li> Handle session updates
+         uint32 updateSessionsTime = WorldTimer::getMSTime();
+         UpdateSessions(diff);
++        ParkObjects::Update();
+         updateSessionsTime = WorldTimer::getMSTimeDiffToNow(updateSessionsTime);
+         if (getConfig(CONFIG_UINT32_PERFLOG_SLOW_SESSIONS_UPDATE) && updateSessionsTime > getConfig(CONFIG_UINT32_PERFLOG_SLOW_SESSIONS_UPDATE))
+             sLog.Out(LOG_PERFORMANCE, LOG_LVL_MINIMAL, "Update sessions: %ums", updateSessionsTime);
 diff --git a/src/shared/Progression.h b/src/shared/Progression.h
-index f9a08bc..a92c9e0 100644
+index f9a08bce..a92c9e08 100644
 --- a/src/shared/Progression.h
 +++ b/src/shared/Progression.h
 @@ -33,7 +33,7 @@

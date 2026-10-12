@@ -52,7 +52,7 @@ fi
 dirlist="$(printf '%s\n' $dirs | sed 's/.*DIR://' | sort -u)"
 if [ -z "$dirlist" ]; then
     echo "check: docs-only round ($(printf '%s\n' "$changed" | wc -l | tr -d ' ') file(s)) — no gate can change; fmt only"
-    cargo fmt --all -- --check || exit 1
+    python3 scripts/format_workspace.py --check || exit 1
     echo "check: green (docs only)"
     exit 0
 fi
@@ -108,7 +108,7 @@ run() {
     echo "check ok: $name"
 }
 
-run fmt cargo fmt --all -- --check
+run fmt python3 scripts/format_workspace.py --check
 run clippy cargo clippy $pflags --all-targets -- -D warnings
 run test env BENILLA_SKIP_LOG="$skips" cargo test $pflags
 # Data-gated tests skip without the install or the addon corpus and libtest swallows their line,

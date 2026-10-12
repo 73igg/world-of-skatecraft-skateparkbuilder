@@ -5,6 +5,11 @@ pub mod auth;
 pub mod events;
 pub mod guid;
 pub mod messages;
+/// Session-owned park objects for the World of Skatecraft fork.
+pub mod park;
+pub mod skate_flag;
+/// Negotiated presentation protocol for the World of Skatecraft fork.
+pub mod skatecraft;
 pub mod wire;
 pub mod world;
 pub use auth::AuthReject;

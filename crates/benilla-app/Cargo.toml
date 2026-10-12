@@ -12,7 +12,7 @@ workspace = true
 # `dev` compiles in the instruments; the player build (`scripts/gates.sh`) has no defaults.
 default = ["dev"]
 # The asset, format and world crates default `dev` on, so they come in without it, forwarded here.
-dev = ["benilla-assets/dev", "benilla-formats/dev", "benilla-world/dev", "dep:bevy_egui"]
+dev = ["benilla-assets/dev", "benilla-formats/dev", "benilla-world/dev"]
 tracy = ["bevy/trace_tracy"]
 # Writes every system's per-run span to `trace-<ts>.json` in the cwd.
 trace_chrome = ["bevy/trace_chrome"]
@@ -24,7 +24,8 @@ arboard = "3"
 benilla-ui = { path = "../benilla-ui" }
 bevy.workspace = true
 wgpu.workspace = true
-bevy_egui = { version = "0.39", optional = true }
+bevy_egui = { version = "0.39" }
+benilla-park-assets = { path = "../benilla-park-assets" }
 bytemuck = { version = "1", features = ["derive"] }
 # `f16` decode for the `WOW_BOOTH_DUMP` dump of the `Rgba16Float` booth targets.
 half = "2"
@@ -67,8 +68,9 @@ mint = "0.5"
 # The gossip greeting's weighted draw, re-rolled per open as in the reference.
 rand = "0.8"
 # Skate 3 mode: the skate engine, fetched from Chasm's 2010 Rust Rewrite Mashup (Kimmo3223's
-# branch adds Linux controller input); not part of this repository. See NOTICE.
-skate-host = { git = "https://github.com/Kimmo3223/2010-rust-rewrite-mashup", rev = "099b1948e9c08394b20c760ef123da38ef347278" }
+# branch adds Linux controller input). Setup fetches the pinned host and applies our camera
+# preference bridge; the engine remains external. See NOTICE and setup/prepare_skate_engine.py.
+skate-host = { path = "../../.setup/skate-camera-engine/skate/crates/skate-host" }
 serde_json = "1"
 
 # Wayland clipboard over the standard `wl_data_device`; arboard's speaks `wlr-data-control`,

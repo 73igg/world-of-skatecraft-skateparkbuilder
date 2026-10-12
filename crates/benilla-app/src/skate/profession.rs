@@ -6,21 +6,22 @@
 //! (no Summon Skateboard in our spellbook) `J` simply hops on and off, as before.
 
 use benilla_formats::skatecraft::{
-    SPELL_MOON_JUMP, SPELL_OLLIE_BOOST, SPELL_ROCKET_BOOST, SPELL_SPEED_DEMON,
-    SPELL_SUMMON_SKATEBOARD,
+    SkateCameraDistance, SkateCameraPreset, SkateSpeed, SPELL_MOON_JUMP, SPELL_OLLIE_BOOST,
+    SPELL_ROCKET_BOOST, SPELL_SPEED_DEMON, SPELL_SUMMON_SKATEBOARD,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use skate_host::bridge::Session;
 
-use crate::net::{ClientCommand, NetCommands, ObjectStore, SelfPlayer};
+use crate::net::{ClientCommand, NetCommands, ObjectStore, SelfGuid, SelfPlayer};
 
+/// A modest floatier skate feel: 10% less gravity and 10% higher ollies than stock Skate 3.
+const BASE_GRAVITY: f32 = 0.9;
+const BASE_POP: f32 = 1.1;
 /// Moon Jump's share of gravity while the buff lasts.
 const MOON_GRAVITY: f32 = 0.35;
 /// Ollie Boost's multiplier on the engine's pop (ollies and grind pops).
 const OLLIE_POP: f32 = 1.8;
-/// Speed Demon's multiplier on the engine's push speed and power.
-const SPEED_PUSH: f32 = 1.6;
 /// Below this (m/s) Rocket Boost fires along the board rather than the roll.
 const ROCKET_ROLLING: f32 = 1.0;
 /// Rocket Boost's burst, m/s forward and up.
@@ -54,9 +55,79 @@ pub(super) struct Profession<'w, 's> {
     self_q: Query<'w, 's, &'static ObjectStore, With<SelfPlayer>>,
     actions: Option<Res<'w, crate::ui_action::PlayerActions>>,
     commands: Option<Res<'w, NetCommands>>,
+    speed: Res<'w, SpeedSetting>,
+    camera: Res<'w, CameraSetting>,
+}
+
+/// Restored from the server per character, including when riding starts again.
+#[derive(Resource, Default)]
+pub(super) struct SpeedSetting(SkateSpeed);
+
+/// Live camera distance, restored from the server independently of skate speed.
+#[derive(Resource)]
+pub(super) struct CameraSetting {
+    distance: f32,
+    preset: SkateCameraPreset,
+}
+
+impl Default for CameraSetting {
+    fn default() -> Self {
+        Self {
+            distance: std::env::var("WOW_SKATE_CAM_PULL")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(2.0),
+            preset: SkateCameraPreset::default(),
+        }
+    }
+}
+
+pub(super) fn on_setting(
+    In(ev): In<benilla_protocol::SessionEvent>,
+    self_guid: Res<SelfGuid>,
+    mut speed: ResMut<SpeedSetting>,
+    mut camera: ResMut<CameraSetting>,
+) {
+    if let benilla_protocol::SessionEvent::Chat(message) = ev {
+        if message.is_addon() && Some(message.sender_guid) == self_guid.0 {
+            if let Some(setting) = SkateSpeed::from_server_message(&message.text) {
+                speed.0 = setting;
+                info!("skate: selected speed {:.1}x", setting.multiplier());
+            }
+            if let Some(setting) = SkateCameraDistance::from_server_message(&message.text) {
+                camera.distance = setting.multiplier();
+                info!("skate: camera distance {:.1}x", camera.distance);
+            }
+            if let Some(preset) = SkateCameraPreset::from_server_message(&message.text) {
+                camera.preset = preset;
+                info!("skate: camera preset {}", preset.name());
+            }
+        }
+    }
+}
+
+pub(super) fn reset_settings(
+    In(_): In<benilla_protocol::SessionEvent>,
+    mut speed: ResMut<SpeedSetting>,
+    mut camera: ResMut<CameraSetting>,
+) {
+    speed.0 = SkateSpeed::default();
+    *camera = CameraSetting::default();
 }
 
 impl Profession<'_, '_> {
+    pub(super) fn speed(&self) -> SkateSpeed {
+        self.speed.0
+    }
+
+    pub(super) fn camera_distance(&self) -> f32 {
+        self.camera.distance
+    }
+
+    pub(super) fn camera_preset(&self) -> SkateCameraPreset {
+        self.camera.preset
+    }
     /// Whether the board is a spell here: we know Summon Skateboard.
     pub(super) fn server_board(&self) -> bool {
         self.actions
@@ -133,16 +204,24 @@ pub(super) struct Boosts {
     pub(super) ollie: bool,
     pub(super) speed: bool,
     pub(super) moon: bool,
+    pub(super) selected_speed: SkateSpeed,
+    pub(super) camera_preset: SkateCameraPreset,
     /// Fire Rocket Boost's burst once, at this step.
     pub(super) rocket: bool,
 }
 
 impl Boosts {
-    pub(super) fn from_auras(auras: SkateAuras) -> Self {
+    pub(super) fn from_auras(
+        auras: SkateAuras,
+        selected_speed: SkateSpeed,
+        camera_preset: SkateCameraPreset,
+    ) -> Self {
         Self {
             ollie: auras.ollie,
             speed: auras.speed,
             moon: auras.moon,
+            selected_speed,
+            camera_preset,
             rocket: false,
         }
     }
@@ -164,15 +243,20 @@ impl Default for BoostState {
 pub(super) fn apply(session: &mut Session, boosts: &Boosts, state: &mut BoostState) {
     // The engine plans each jump at takeoff, so the boosts tune it rather than push it.
     let tuning = (
-        if boosts.ollie { OLLIE_POP } else { 1.0 },
-        if boosts.speed { SPEED_PUSH } else { 1.0 },
-        if boosts.moon { MOON_GRAVITY } else { 1.0 },
+        if boosts.ollie { OLLIE_POP } else { BASE_POP },
+        boosts.selected_speed.effective_multiplier(boosts.speed),
+        if boosts.moon {
+            MOON_GRAVITY
+        } else {
+            BASE_GRAVITY
+        },
     );
     if tuning != state.tuning {
         session.set_boost_tuning(tuning.0, tuning.1);
-        session.set_gravity_scale(tuning.2);
         state.tuning = tuning;
     }
+    // Entering an air state resets its trajectory acceleration, so reapply after each tick.
+    session.set_gravity_scale(tuning.2);
 }
 
 fn add(session: &mut Session, dv: Vec3) {

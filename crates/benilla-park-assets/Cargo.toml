@@ -1,0 +1,18 @@
+[package]
+name = "benilla-park-assets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Private local object catalog, model packages and search for the Skatecraft park builder"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+benilla-formats = { path = "../benilla-formats", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1.workspace = true
+flate2 = "1"
+glam = "0.30"

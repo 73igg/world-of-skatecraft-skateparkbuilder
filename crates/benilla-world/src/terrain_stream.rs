@@ -61,6 +61,7 @@ const SPAWN_BUDGET: Duration = Duration::from_millis(4);
 /// The streamer's residency state: the loaded tiles and the entity each spawned as.
 #[derive(Resource, Default)]
 pub struct TerrainStreamer {
+    retained: Option<[f32; 2]>,
     /// Loaded tiles by `(tile_x, tile_y)`; each handle keeps its asset resident.
     tiles: HashMap<(i32, i32), TileState>,
     /// The map directory the tiles are for; a change drops every tile.
@@ -84,6 +85,11 @@ pub struct TerrainStreamer {
     /// The off-grid focus tile last warned about, so the warning fires once per tile.
     off_grid_reported: Option<(i32, i32)>,
 }
+
+/// One additional return destination kept resident by a game extension, in WoW coordinates.
+/// A viewer without this resource keeps the ordinary single-window residency policy.
+#[derive(Resource, Default)]
+pub struct RetainedFocus(pub Option<[f32; 2]>);
 
 /// The map-global WMO's placement id: a WMO-only map has no ADT uniqueIds to collide with, and
 /// this is the file's own dead `uniqueId` (the reference overwrites it from a counter, `0xc9a320`).
@@ -469,6 +475,7 @@ fn stream_terrain(
         Option<Res<CurrentMap>>,
         Option<Res<MapCatalogRes>>,
         Res<crate::view::ViewDistance>,
+        Option<Res<RetainedFocus>>,
     ),
     mut load_progress: Option<ResMut<WorldLoadProgress>>,
     // The stream-batch accumulators the map-change drop must clear.
@@ -481,7 +488,7 @@ fn stream_terrain(
 ) {
     let (mut welds, mut static_merge, mut staticgx) = batchers;
     let (mut materials, mut meshes, wdts, _time, mut activity) = asset_stores;
-    let (current_map, map_catalog, view) = location;
+    let (current_map, map_catalog, view, retained) = location;
     // Idle until other plugins' startup has made the light buffer and the map catalog.
     let (Some(shared_light), Some(map_catalog)) = (shared_light, map_catalog) else {
         return;
@@ -555,8 +562,12 @@ fn stream_terrain(
     // The residency window is the reference's, from the live `farclip` in chunk units.
     let center = focus.resolve(camera.single().ok().map(|c| c.translation));
     let window = StreamWindow::at(view.farclip, center[0], center[1]);
+    let retained = retained.as_ref().and_then(|r| r.0);
+    let retained_window = retained.map(|p| StreamWindow::at(view.farclip, p[0], p[1]));
     let (cx, cy) = window.focus_tile();
-    let same_window = state.focus == (cx, cy) && state.reach == Some((window.inner, window.outer));
+    let same_window = state.focus == (cx, cy)
+        && state.reach == Some((window.inner, window.outer))
+        && state.retained == retained;
     // Skip an unchanged frame only in a paced, complete, presentable world, since the tail it
     // bypasses releases a load; even then the undrawn count stays fresh, so a rebake un-skips it.
     if same_window
@@ -574,6 +585,7 @@ fn stream_terrain(
         return;
     }
     state.focus = (cx, cy);
+    state.retained = retained;
     if state.reach != Some((window.inner, window.outer)) {
         state.reach = Some((window.inner, window.outer));
         info!(
@@ -588,6 +600,11 @@ fn stream_terrain(
     // Every tile the outer window touches on the 64×64 grid, less those the WDT's `MAIN` bit 0
     // says do not exist, as the reference tests (`0x69863c`).
     let mut desired = window.wanted_tiles();
+    if let Some(extra) = retained_window.as_ref() {
+        desired.extend(extra.wanted_tiles());
+        desired.sort_unstable();
+        desired.dedup();
+    }
     if let Some(w) = wdt_index {
         desired.retain(|&(tx, ty)| w.has_tile(tx as u32, ty as u32));
     }
@@ -625,7 +642,9 @@ fn stream_terrain(
             .tiles
             .keys()
             .copied()
-            .filter(|&tile| !window.keeps(tile))
+            .filter(|&tile| {
+                !window.keeps(tile) && retained_window.as_ref().is_none_or(|w| !w.keeps(tile))
+            })
             .collect()
     };
     let stale_empty = stale.is_empty();

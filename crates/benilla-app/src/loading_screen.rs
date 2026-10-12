@@ -27,6 +27,8 @@ use benilla_world::world_map::CurrentMap;
 
 /// The cover's input half: while it is up the client takes no input (a source cut in `PreUpdate`).
 mod input;
+// Only developer probes name this set outside the loading-screen subsystem.
+#[allow(unused_imports)]
 pub(crate) use input::CoverInput;
 
 // The bar, from the `LoadingScreen.cpp` descriptor table at `0x7ffd34` (read by `0x407150`):
@@ -437,6 +439,7 @@ fn drive_loading_screen(
         MessageReader<crate::net::CharacterLoginFailedMessage>,
         Option<Res<crate::net::PendingTransfer>>,
         Option<Res<crate::char_select::Roster>>,
+        Option<Res<crate::skate::flag::State>>,
     ),
 ) {
     let (
@@ -449,12 +452,14 @@ fn drive_loading_screen(
         mut refusals,
         transfer,
         roster,
+        skate_flag,
     ) = edges;
     let (progress, focus) = (&stream.0, &stream.1);
     let now = time.elapsed_secs();
     let map_id = current_map.as_ref().map(|m| m.0);
     // The physics hold releases on the same residency signal, so the body's world is live first.
     let player_settling = player.as_ref().is_some_and(|p| p.settling);
+    let seamless_flag = skate_flag.as_ref().is_some_and(|s| s.silent_transition());
 
     // --- The edges. ---
     // A glue entry (not the seamless in-world reconnect), raised on the frame the glue tears down
@@ -519,6 +524,7 @@ fn drive_loading_screen(
     // only, since behind the glue nothing loads; and only while the focus is the body, since in a
     // cinematic or free-fly residency describes the camera's tile. ---
     if !screen.active
+        && !seamless_flag
         && !progress.focus_resident
         && focus.follows_body()
         && *state.get() == crate::char_select::ClientState::InWorld
@@ -538,6 +544,7 @@ fn drive_loading_screen(
     };
     screen.last_pos = body;
     if relocated
+        && !seamless_flag
         && !screen.active
         && *state.get() == crate::char_select::ClientState::InWorld
         && !(progress.is_ready() && progress.presentable())

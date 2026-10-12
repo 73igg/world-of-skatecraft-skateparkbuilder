@@ -9,6 +9,15 @@ if [ -e /etc/NIXOS ] && [ -z "${IN_NIX_SHELL:-}" ]; then
 fi
 [ -x target/release/benilla ] || { echo "Not built yet: run setup/setup.sh first."; exit 1; }
 docker compose -p "${SKATECRAFT_SERVER_PROJECT:-world-of-skatecraft}" --project-directory server -f server/compose.yaml up -d
+export WOW_PARK_ASSETS="$ROOT/benilla-config/park-assets"
+CATALOG_PYTHON="$ROOT/.setup/venv/bin/python"
+if [ ! -e "$WOW_PARK_ASSETS/skate-catalog.json" ]; then
+    [ -x "$CATALOG_PYTHON" ] || { echo "The object catalog converter is missing: run setup first."; exit 1; }
+    "$CATALOG_PYTHON" tools/prepare_park_catalog.py --out "$WOW_PARK_ASSETS"
+fi
+if [ ! -e "$WOW_PARK_ASSETS/wow-names.json" ] && [ -x "$CATALOG_PYTHON" ]; then
+    "$CATALOG_PYTHON" tools/cache_park_object_names.py --container "${SKATECRAFT_SERVER_PROJECT:-world-of-skatecraft}-database-1" --out "$WOW_PARK_ASSETS/wow-names.json"
+fi
 export WOW_HOST=localhost
 export WOW_SKATE_ASSETS="$ROOT/skate-data/assets"
 export WOW_SKATE_AUDIO="$ROOT/skate-audio"

@@ -1,0 +1,378 @@
+diff --git a/skate/crates/skate-host/Cargo.toml b/skate/crates/skate-host/Cargo.toml
+index ddfac0b..2814160 100644
+--- a/skate/crates/skate-host/Cargo.toml
++++ b/skate/crates/skate-host/Cargo.toml
+@@ -6,9 +6,9 @@ publish=false
+ [workspace]
+ [dependencies]
+ bevy={version="0.19",default-features=false,features=["std","multi_threaded","bevy_log"]}
+-skate-core={path="../skate-core"}
+-skate-data={path="../skate-data"}
+-skate-net={path="../skate-net"}
++skate-core={git="https://github.com/Kimmo3223/2010-rust-rewrite-mashup",rev="099b1948e9c08394b20c760ef123da38ef347278"}
++skate-data={git="https://github.com/Kimmo3223/2010-rust-rewrite-mashup",rev="099b1948e9c08394b20c760ef123da38ef347278"}
++skate-net={git="https://github.com/Kimmo3223/2010-rust-rewrite-mashup",rev="099b1948e9c08394b20c760ef123da38ef347278"}
+ serde={version="1",features=["derive"]}
+ serde_json="1"
+ half="2.7.1"
+diff --git a/skate/crates/skate-host/src/camera/runtime.rs b/skate/crates/skate-host/src/camera/runtime.rs
+index 553b103..16776c8 100644
+--- a/skate/crates/skate-host/src/camera/runtime.rs
++++ b/skate/crates/skate-host/src/camera/runtime.rs
+@@ -22,6 +22,8 @@ pub(crate) struct CameraRuntime {
+     shakes: [ShakeSamples; 2],
+     trajectories: [TrajectoryResult; 3],
+     pub frame: Option<CameraFrame>,
++    /// Native normal camera preference: 0 Low, 1 High.
++    pub camera_type: u32,
+     /// Immutable physical subject publication consumed by the camera graph.
+     /// Rendering may inspect this snapshot for diagnostics without rebuilding
+     /// subject fields from mutable skater state.
+@@ -56,7 +58,7 @@ impl CameraRuntime {
+         Ok(Self { manager: CameraMan::new(), subject: SubjectPublisher::new(), graph,
+             shots: StockShots::from_collections(&data)?, settings: settings::manager_settings(&data)?,
+             compass_settings: settings::compass_settings(&data)?, shakes: [samples("1.shk")?, samples("2.shk")?],
+-            trajectories: core::array::from_fn(|_| TrajectoryResult::new()), frame: None,
++            trajectories: core::array::from_fn(|_| TrajectoryResult::new()), frame: None, camera_type: 1,
+             latest_subject: None,
+             simulation_rate_requests: Vec::new() })
+     }
+diff --git a/skate/crates/skate-host/src/input/platform.rs b/skate/crates/skate-host/src/input/platform.rs
+index 7a54ad5..bbb3f8e 100644
+--- a/skate/crates/skate-host/src/input/platform.rs
++++ b/skate/crates/skate-host/src/input/platform.rs
+@@ -21,6 +21,21 @@ pub(crate) struct DevicePacket {
+     pub subtype: u8,
+ }
+ 
++impl Clone for DevicePacket {
++    fn clone(&self) -> Self {
++        Self {
++            number: self.number,
++            state: XboxState {
++                buttons: self.state.buttons,
++                triggers: self.state.triggers,
++                left: self.state.left,
++                right: self.state.right,
++            },
++            subtype: self.subtype,
++        }
++    }
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub(crate) enum DeviceError {
+     Disconnected,
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 812f6c2..362959c 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -106,7 +106,10 @@ impl Session {
+             BaseCollision::Triangles(triangles, rails) => {
+                 let mut all = triangles.clone();
+                 all.extend(extra);
+-                crate::skate_world::collision_world(&collision_map(all, rails.clone(), [0.; 3], 0.), material)?
++                crate::skate_world::collision_world(
++                    &collision_map(all, rails.clone(), [0.; 3], 0.),
++                    material,
++                )?
+             }
+         };
+         let grind = self.physics.grind_world();
+@@ -134,6 +137,12 @@ impl Session {
+             self.camera.set_aspect_ratio(aspect_ratio);
+         }
+     }
++    /// Select the native Low (0) or High (1) follow-camera graph.
++    pub fn set_camera_type(&mut self, camera_type: u32) {
++        if camera_type <= 1 {
++            self.camera.camera_type = camera_type;
++        }
++    }
+     /// Eagerly decode immutable animation banks before a map is ready.
+     pub fn preload(root: &Path) -> Result<(), String> {
+         crate::skater_animation::AnimationSource::load(root).map(|_| ())
+@@ -141,6 +150,18 @@ impl Session {
+     /// Reuse the complete world and animation session. The original teleport path
+     /// resets physical bodies and animation state at the new MW2 position.
+     pub fn activate(&mut self, spawn: [f32; 3], heading: f32) -> Result<Pose, String> {
++        self.activate_with_board(spawn, heading, true)
++    }
++    /// A saved return point starts in native walking mode, with the board held and no roll.
++    pub fn activate_offboard(&mut self, spawn: [f32; 3], heading: f32) -> Result<Pose, String> {
++        self.activate_with_board(spawn, heading, false)
++    }
++    fn activate_with_board(
++        &mut self,
++        spawn: [f32; 3],
++        heading: f32,
++        on_board: bool,
++    ) -> Result<Pose, String> {
+         native_float_mode();
+         self.input = ControllerInput::default();
+         self.markers.suspend();
+@@ -153,7 +174,7 @@ impl Session {
+         )
+         .to_cols_array_2d();
+         transform[3][3] = 0.;
+-        self.skater.travel_to(transform)?;
++        self.skater.travel_to(transform, on_board)?;
+         for _ in 0..4 {
+             self.tick(Controls::default())?;
+         }
+@@ -239,7 +260,8 @@ impl Session {
+         gravity.z = base.z * scale;
+         let air = &mut self.skater.air_state;
+         if air.use_centre_of_mass_velocity {
+-            air.centre_of_mass_trajectory.acceleration[1] = super::air_phase::COM_ACCELERATION[1] * scale;
++            air.centre_of_mass_trajectory.acceleration[1] =
++                super::air_phase::COM_ACCELERATION[1] * scale;
+         }
+     }
+     /// The deck's velocity (m/s) and forward axis, engine space.
+@@ -333,57 +355,57 @@ fn collision_map(
+     heading: f32,
+ ) -> SkateMap {
+     SkateMap {
+-            version: 14,
+-            name: "IW4L collision".into(),
+-            spawn,
+-            heading,
+-            environment: vec![],
+-            materials: vec![skate_data::skate_map::Material {
+-                name: "MW2".into(),
+-                flags: 0,
+-                friction: 0.8,
+-                restitution: 0.,
+-                color: [1.; 3],
+-                roughness: 1.,
+-                emissive: 0.,
+-                textures: [0; 5],
+-                indirect_strength: 1.,
+-                alpha_mode: 0,
+-                alpha_cutoff: 0.5,
+-                audio: 0,
+-                physics: 0,
+-                pattern: 0,
+-                depth_layer: None,
+-                retail_definition: None,
+-            }],
+-            textures: vec![],
+-            geometry: Geometry {
+-                vertices: vec![],
+-                indices: vec![],
+-                collision: triangles
+-                    .into_iter()
+-                    .map(|points| Collision {
+-                        points,
+-                        surface: 0,
+-                        material: 1,
+-                        native_edges: None,
+-                    })
+-                    .collect(),
+-            },
+-            rails: rails
++        version: 14,
++        name: "IW4L collision".into(),
++        spawn,
++        heading,
++        environment: vec![],
++        materials: vec![skate_data::skate_map::Material {
++            name: "MW2".into(),
++            flags: 0,
++            friction: 0.8,
++            restitution: 0.,
++            color: [1.; 3],
++            roughness: 1.,
++            emissive: 0.,
++            textures: [0; 5],
++            indirect_strength: 1.,
++            alpha_mode: 0,
++            alpha_cutoff: 0.5,
++            audio: 0,
++            physics: 0,
++            pattern: 0,
++            depth_layer: None,
++            retail_definition: None,
++        }],
++        textures: vec![],
++        geometry: Geometry {
++            vertices: vec![],
++            indices: vec![],
++            collision: triangles
+                 .into_iter()
+-                .enumerate()
+-                .map(|(i, p)| Rail {
+-                    name: format!("iw4_edge_{i}"),
+-                    closed: false,
+-                    points: p,
+-                    native: None,
++                .map(|points| Collision {
++                    points,
++                    surface: 0,
++                    material: 1,
++                    native_edges: None,
+                 })
+                 .collect(),
+-            doors: vec![],
+-            lights: vec![],
+-            routes: vec![],
+-            extensions: vec![],
++        },
++        rails: rails
++            .into_iter()
++            .enumerate()
++            .map(|(i, p)| Rail {
++                name: format!("iw4_edge_{i}"),
++                closed: false,
++                points: p,
++                native: None,
++            })
++            .collect(),
++        doors: vec![],
++        lights: vec![],
++        routes: vec![],
++        extensions: vec![],
+     }
+ }
+ 
+@@ -393,6 +415,7 @@ fn collision_map(
+ pub struct ControllerTransport {
+     capabilities: [crate::input::platform::CapabilityCache; 4],
+ }
++#[derive(Clone)]
+ pub struct InputFrame {
+     samples: [Result<crate::input::platform::DevicePacket, crate::input::platform::DeviceError>; 4],
+ }
+@@ -406,9 +429,53 @@ impl ControllerTransport {
+     }
+ }
+ impl InputFrame {
++    /// Reserved host controls never enter the native action graph; other input is unchanged.
++    pub fn without_buttons(mut self, mask: u16) -> Self {
++        for packet in self.samples.iter_mut().filter_map(|p| p.as_mut().ok()) {
++            packet.state.buttons &= !mask;
++        }
++        self
++    }
++    /// Retains right-stick directions and analog-trigger transitions in a bounded host history.
++    /// Raw axes still reach the native Pad unchanged.
++    pub fn gesture_key(&self) -> u8 {
++        let Some(packet) = self.samples.iter().find_map(|s| s.as_ref().ok()) else {
++            return 0;
++        };
++        let [x, y] = packet.state.right.map(f32::from);
++        let sector = if x * x + y * y < 8000.0 * 8000.0 {
++            0
++        } else {
++            (((y.atan2(x) / std::f32::consts::FRAC_PI_4).round() as i32).rem_euclid(8) + 1) as u8
++        };
++        let band = |v: u8| match v {
++            0 => 0,
++            1..=127 => 1,
++            128..=254 => 2,
++            255 => 3,
++        };
++        sector | (band(packet.state.triggers[0]) << 4) | (band(packet.state.triggers[1]) << 6)
++    }
++    /// Deterministic raw-packet entry point for input playback and diagnostics.
++    pub fn from_controls(controls: Controls) -> Self {
++        let mut frame = Self::neutral();
++        frame.samples[0] = Ok(crate::input::platform::DevicePacket {
++            number: 1,
++            state: skate_core::input::xbox::XboxState {
++                buttons: controls.buttons,
++                triggers: controls.triggers,
++                left: controls.left,
++                right: controls.right,
++            },
++            subtype: 1,
++        });
++        frame
++    }
+     pub fn neutral() -> Self {
+         Self {
+-            samples: std::array::from_fn(|_|Err(crate::input::platform::DeviceError::Disconnected)),
++            samples: std::array::from_fn(|_| {
++                Err(crate::input::platform::DeviceError::Disconnected)
++            }),
+         }
+     }
+     pub fn controller(&self) -> Option<usize> {
+diff --git a/skate/crates/skate-host/src/physics/camera_output.rs b/skate/crates/skate-host/src/physics/camera_output.rs
+index 1b186bb..365ba9e 100644
+--- a/skate/crates/skate-host/src/physics/camera_output.rs
++++ b/skate/crates/skate-host/src/physics/camera_output.rs
+@@ -12,7 +12,7 @@ use skate_core::{
+ };
+ 
+ /// The actual game camera call, after completed physical output conditioning.
+-/// The user's selected normal High camera is graph type1. This custom world
++/// The normal camera preference selects graph type0 Low or type1 High. This custom world
+ /// has no road/ledge/camera-volume annotations or other moving actors.
+ pub(crate) fn advance(
+     physics: &GamePhysics,
+@@ -57,7 +57,7 @@ pub(crate) fn advance(
+     )?;
+     let snapshot = crate::camera::publish_camera_subject(physics, skater, &inputs)?;
+     let environment = crate::camera::CameraGraphEnvironment {
+-        camera_type: 1,
++        camera_type: camera.camera_type,
+         on_road: false,
+         ledge_left: false,
+         ledge_right: false,
+diff --git a/skate/crates/skate-host/src/physics/skater.rs b/skate/crates/skate-host/src/physics/skater.rs
+index c6b31c4..8f10682 100644
+--- a/skate/crates/skate-host/src/physics/skater.rs
++++ b/skate/crates/skate-host/src/physics/skater.rs
+@@ -98,9 +98,13 @@ pub(crate) struct SkaterRuntime {
+ }
+ 
+ impl SkaterRuntime {
+-    pub(crate) fn travel_to(&mut self, transform: [[f32; 4]; 4]) -> Result<(), String> {
++    pub(crate) fn travel_to(
++        &mut self,
++        transform: [[f32; 4]; 4],
++        on_board: bool,
++    ) -> Result<(), String> {
+         self.player_input.request_teleport(transform)?;
+-        self.teleport_state.request_manual(transform, true);
++        self.teleport_state.request_manual(transform, on_board);
+         Ok(())
+     }
+     pub fn load(
+@@ -113,7 +117,10 @@ impl SkaterRuntime {
+     }
+ 
+     pub(crate) fn load_for_world(
+-        asset_root: &Path, graphs: &StockGraphs, physics: &GamePhysics, mode: &str,
++        asset_root: &Path,
++        graphs: &StockGraphs,
++        physics: &GamePhysics,
++        mode: &str,
+         source: Option<std::sync::Arc<crate::skater_animation::AnimationSource>>,
+     ) -> Result<Self, String> {
+         let data = Collections::load(asset_root)?;
+@@ -224,7 +231,10 @@ impl SkaterRuntime {
+         Ok(Self {
+             respawn,
+             scoring: crate::scoring_runtime::Runtime::load(&data)?,
+-            climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
++            climbing: super::climbing::Runtime::load(
++                asset_root,
++                &animation.evaluator.frames.bone_names,
++            )?,
+             render_pose: initial_hierarchy,
+             pose_generation: 0,
+             centre_of_mass_filter: Default::default(),
+@@ -247,7 +257,9 @@ impl SkaterRuntime {
+             landing_on_deck: super::landing_on_deck::Runtime::load(&data)?,
+             landing_deck: super::offboard::landing_deck::Owner::load(&data)?,
+             ground_animation: Default::default(),
+-            ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(&data)?,
++            ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(
++                &data,
++            )?,
+             revert_state: super::revert_state::RevertState::load(&data)?,
+             slide_state: super::slide_state::SlideState::load(&data)?,
+             trajectory,
