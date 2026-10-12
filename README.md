@@ -13,9 +13,9 @@ copies. Game files, extracted/converted assets, databases, credentials and binar
 > operating systems and may require platform-specific setup or code changes. The original
 > project supports Linux, but this fork's additions and Windows setup have separate requirements.
 
-[![Watch the Skatepark Builder showcase](docs/media/skatebuilder-preview.png)](docs/media/skatebuilder.mp4?raw=true)
+https://github.com/user-attachments/assets/7d2f8374-8227-45dc-9663-7c5b1d77b768
 
-*Click the preview to open or download the full builder video.*
+*[Download the full-resolution builder video](docs/media/skatebuilder.mp4?raw=true).*
 
 - Open the editor with **F8** or the **Park Builder** ability. Place ramps, quarter pipes, rails,
   platforms, boxes and stairs, or pick a model from the **Object Catalog**.
@@ -34,9 +34,9 @@ copies. Game files, extracted/converted assets, databases, credentials and binar
 
 ## Personal respawn flag
 
-[![Watch the personal respawn flag showcase](docs/media/respawn-flag-preview.png)](docs/media/respawn-flag.mp4?raw=true)
+https://github.com/user-attachments/assets/a8fdf092-e1ec-48d6-ac91-1b686a07bd12
 
-*Click the preview to open or download the full flag video.*
+*[Download the full-resolution flag video](docs/media/respawn-flag.mp4?raw=true).*
 
 In **Skate mode**, hold **Select / Back** (**Create** on PS5) for **0.7 seconds** to place your
 private flag. Tap and release the same button to return to it. Return restores the saved facing
