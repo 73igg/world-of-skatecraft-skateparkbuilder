@@ -73,11 +73,11 @@ Speed and distance controls use the up/down arrow icons. Speed, distance and pre
 are saved per character on the server. Each press prints the current setting in chat; speed
 messages also show the effective Speed Demon multiplier and the push-speed limit in mph/km/h.
 
-## Other changes from the original
+## Latest additions
 
 - **Replay editor:** up to **90 seconds** of recent skating, opened with **F6**, **both stick
-  clicks**, or the **Skate Replay** ability. The recording window is adjustable from **15–90
-  seconds** in 15-second steps and remembered locally. Scrub and step frames, trim a clip, change playback speed,
+  clicks**, or the **Skate Replay** ability. The recording window is adjustable from
+  **15–90 seconds** in 15-second steps and remembered locally. Scrub and step frames, trim a clip, change playback speed,
   choose recorded/free/follow/tripod cameras, and save camera keyframes or cuts. Save editable
   clips locally and export video with skating sounds using FFmpeg. Playback leaves your live
   server position parked; exiting returns you holding the board. Historical builder objects are
@@ -85,11 +85,17 @@ messages also show the effective Speed Demon multiplier and the push-speed limit
 - **Natural character proportions:** animation retargeting preserves each playable race and
   sex's authored bone lengths and torso shape, including small Gnomes, large Tauren and hunched
   Undead. The pelvis and foot contacts adapt to the board, grabs use reach-limited arm placement,
-  and a carried board follows the corrected hand. All races start with a **1x board**;
-  **`/boardsize <number>`** saves an exact board multiplier for your current race, shared by
-  your characters of that race on this PC. It applies while riding, carrying and replaying.
-  `/boardsize` shows the value and `/boardsize reset` restores 1x. These are runtime code changes; no modified
+  and a carried board follows the corrected hand. These are runtime code changes; no modified
   character models or replacement game assets are distributed.
+- **Board size by race:** all races start with a **1x board**. **`/boardsize <number>`** saves
+  an exact board multiplier for your current race, shared by your characters of that race on
+  this PC. It applies while riding, carrying and replaying. `/boardsize` shows the value and
+  `/boardsize reset` restores 1x; each race's setting persists across logins.
+- **Windows desktop launcher:** launching through the desktop shortcut uses your configured
+  player account correctly when the checkout also has a separate automated test account.
+
+## Other changes from the original
+
 - **Faster default skating:** the selected speed starts at **1.5x**. **Speed Demon** multiplies
   the selected setting by **1.6x**, so the default with the buff is **2.4x**. Speed Demon and
   Rocket Boost print the current speed when used. All skate abilities, including the original
