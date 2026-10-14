@@ -570,6 +570,9 @@ pub(crate) struct CameraControl {
 }
 
 impl CameraControl {
+    pub(crate) fn show_avatar(&mut self) {
+        self.self_fade_alpha = 1.0;
+    }
     /// Park the orbit distance at `d`, both the live value and the wheel target, or the glide
     /// drifts back; for the scripted camera park (`capture::probe_cam`).
     pub(crate) fn park_distance(&mut self, d: f32) {

@@ -67,6 +67,7 @@ pub(super) fn control(
         // The loading cover blanks input at the source; a gesture in flight is unwound below.
         Res<crate::loading_screen::LoadingScreen>,
         Option<Res<crate::park::ParkEditor>>,
+        Option<Res<crate::skate::replay::Replay>>,
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -256,7 +257,14 @@ pub(super) fn control(
     // camera rotate (`0x514444`) still runs. The reference never writes the facing; writing and
     // restoring is the same downstream. Standing up hands the camera's yaw back at the next
     // motion sample, a snap, as `0x5103e0` commits the camera's facing rather than a delta.
-    if !mouse_turns_body || player.control_lost || player.reseat {
+    if !mouse_turns_body
+        || player.control_lost
+        || player.reseat
+        || speed_capsule
+            .11
+            .as_ref()
+            .is_some_and(|replay| replay.blocks_input())
+    {
         player.face_yaw = yaw_before_look;
     }
     {
@@ -301,7 +309,12 @@ pub(super) fn control(
             .map(|(_, t, ..)| (t.translation, server_ride::yaw_of(t.rotation))),
     );
 
-    if speed_capsule.10.as_ref().is_some_and(|park| park.active) {
+    if speed_capsule.10.as_ref().is_some_and(|park| park.active)
+        || speed_capsule
+            .11
+            .as_ref()
+            .is_some_and(|replay| replay.blocks_input() && player.may_skate())
+    {
         movement_net::park_mover(&net.0 .0, &mut player);
         player.horiz_vel = Vec3::ZERO;
         player.vel_y = 0.0;

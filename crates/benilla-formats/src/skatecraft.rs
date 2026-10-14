@@ -30,6 +30,8 @@ pub const SPELL_CAMERA_DISTANCE_DOWN: u32 = 60009;
 /// Cycle between the engine's native High and Low camera presets.
 pub const SPELL_CAMERA_PRESET: u32 = 60010;
 pub const SPELL_PARK_BUILDER: u32 = 60011;
+/// Open the local replay editor while skating; the server privately acknowledges the ability.
+pub const SPELL_REPLAY: u32 = 60012;
 
 /// Speed Demon multiplies the selected speed and push power, rather than replacing them.
 pub const SPEED_DEMON_MULTIPLIER: f32 = 1.6;
@@ -153,7 +155,7 @@ struct SkateSpell {
     cooldown_ms: u32,
 }
 
-const SPELLS: [SkateSpell; 11] = [
+const SPELLS: [SkateSpell; 12] = [
     SkateSpell {
         id: SPELL_SUMMON_SKATEBOARD,
         name: "Summon Skateboard",
@@ -282,6 +284,17 @@ const SPELLS: [SkateSpell; 11] = [
         duration: 0,
         cooldown_ms: 0,
     },
+    SkateSpell {
+        id: SPELL_REPLAY,
+        name: "Skate Replay",
+        description: "Open or close the replay editor to watch your recent skating and edit camera angles. Requires Skate mode. F6 also opens replay.",
+        aura: "",
+        icon: ICON_CAMERA,
+        visual: 0,
+        cast_time: 1,
+        duration: 0,
+        cooldown_ms: 0,
+    },
 ];
 
 /// `bytes` as read for `name`, with our rows appended when `name` is one of the patched tables.
@@ -369,6 +382,7 @@ fn spell_rows() -> Vec<Row> {
                     | SPELL_CAMERA_DISTANCE_DOWN
                     | SPELL_CAMERA_PRESET
                     | SPELL_PARK_BUILDER
+                    | SPELL_REPLAY
             );
             // Spell.dbc 5875, 173 fields; columns as `spells::COL_*` and vmangos `SpellEntry`.
             let mut f = vec![0u32; 173];

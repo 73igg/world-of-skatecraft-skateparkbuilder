@@ -36,6 +36,11 @@ struct Staging {
     incoming: HashMap<Key, Incoming>,
 }
 impl ParkWorld {
+    pub(crate) fn replay_objects(&self) -> Vec<Object> {
+        let mut objects: Vec<_> = self.objects.values().cloned().collect();
+        objects.sort_by_key(|o| (o.owner, o.id));
+        objects
+    }
     /// The authoritative map and instance used by shared park objects and private markers.
     pub(crate) fn scope(&self) -> (u32, u32) {
         (self.map, self.instance)

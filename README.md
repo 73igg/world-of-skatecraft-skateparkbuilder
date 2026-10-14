@@ -1,7 +1,7 @@
 # World of Skatecraft — Skatepark Builder
 
-This fork adds a shared Skatepark Builder, persistent personal return flags, six new abilities,
-and speed, physics, camera and controller improvements to
+This fork adds a shared Skatepark Builder, persistent personal return flags, seven new abilities,
+a replay editor, proportion-preserving character animation, and speed, physics, camera and controller improvements to
 [Kimmo3223's World of Skatecraft](https://github.com/Kimmo3223/world-of-skatecraft).
 
 **Mod source and showcase documentation only.** Everyone supplies their own WoW and Skate 3
@@ -62,6 +62,7 @@ action bar; the adjustment abilities work on or off the board and have no global
 | Added ability | What it does |
 |---|---|
 | **Park Builder** | Opens or closes the shared object editor. |
+| **Skate Replay** | Opens or closes the replay editor while in Skate mode; **F6** also works. |
 | **Increase Skate Speed ↑** | Adds **0.5x** to your selected speed and push power. |
 | **Decrease Skate Speed ↓** | Removes **0.5x**, with a minimum of **0.5x**. |
 | **Increase Skate Camera Distance ↑** | Adds **0.5x** to the engine camera distance. |
@@ -74,6 +75,21 @@ messages also show the effective Speed Demon multiplier and the push-speed limit
 
 ## Other changes from the original
 
+- **Replay editor:** up to **90 seconds** of recent skating, opened with **F6**, **both stick
+  clicks**, or the **Skate Replay** ability. The recording window is adjustable from **15–90
+  seconds** in 15-second steps and remembered locally. Scrub and step frames, trim a clip, change playback speed,
+  choose recorded/free/follow/tripod cameras, and save camera keyframes or cuts. Save editable
+  clips locally and export video with skating sounds using FFmpeg. Playback leaves your live
+  server position parked; exiting returns you holding the board. Historical builder objects are
+  included. [Controls, storage and current scope](docs/skate-replay.md).
+- **Natural character proportions:** animation retargeting preserves each playable race and
+  sex's authored bone lengths and torso shape, including small Gnomes, large Tauren and hunched
+  Undead. The pelvis and foot contacts adapt to the board, grabs use reach-limited arm placement,
+  and a carried board follows the corrected hand. All races start with a **1x board**;
+  **`/boardsize <number>`** saves an exact board multiplier for your current race, shared by
+  your characters of that race on this PC. It applies while riding, carrying and replaying.
+  `/boardsize` shows the value and `/boardsize reset` restores 1x. These are runtime code changes; no modified
+  character models or replacement game assets are distributed.
 - **Faster default skating:** the selected speed starts at **1.5x**. **Speed Demon** multiplies
   the selected setting by **1.6x**, so the default with the buff is **2.4x**. Speed Demon and
   Rocket Boost print the current speed when used. All skate abilities, including the original

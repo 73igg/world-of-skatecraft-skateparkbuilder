@@ -377,6 +377,7 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
     silenced_ui_load(&mut script, |script| {
         let _ = load_ingame_ui(script, identity.as_ref(), &roster, version_check);
         crate::ui_chat::commands::register_dev_commands(script, crate::run_mode::dev_affordances());
+        crate::ui_chat::commands::register_skate_commands(script);
         // The new Minimap's zoom indices from the persisted CVars, as the reference's minimap reset
         // copies each CVar into its live index; `Minimap:SetZoom` owns them from here.
         script.set_minimap_zoom(zoom.0, zoom.1);

@@ -178,6 +178,8 @@ pub(crate) enum Command {
     Emote { text_id: u32 },
     /// One of benilla's own instruments.
     Dev(DevCmd),
+    /// Fork player commands handled through the console registry, in every build.
+    Console(&'static str),
 }
 
 /// The built table: alias (lowercase, no leading `/`) → command.
@@ -242,6 +244,8 @@ impl SlashCommands {
         }
         let dev_aliases = by_alias.len() - before_dev;
 
+        insert(&mut by_alias, "boardsize", Command::Console("boardsize"));
+
         Self {
             by_alias,
             counts: (slash_aliases, emote_aliases, dev_aliases),
@@ -277,6 +281,13 @@ pub(crate) fn register_dev_commands(script: &benilla_ui::script::UiScript, dev: 
         if let Err(e) = script.register_host_slash_command(&key, &aliases) {
             warn!("chat: registering /{}: {e}", cmd.aliases()[0]);
         }
+    }
+}
+
+/// Fork commands are player affordances, available after every in-game UI load or reload.
+pub(crate) fn register_skate_commands(script: &benilla_ui::script::UiScript) {
+    if let Err(e) = script.register_host_slash_command("BENILLA_BOARDSIZE", &["/boardsize"]) {
+        warn!("chat: registering /boardsize: {e}");
     }
 }
 

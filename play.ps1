@@ -148,6 +148,11 @@ try {
         exit $LASTEXITCODE
     }
 
+    if (Test-Path -LiteralPath $loginFile) {
+        # An interactive launch intentionally uses the player's configured account.
+        $env:WOW_ALLOW_ACCOUNT = '1'
+    }
+
     $ErrorActionPreference = 'Continue'
     & $gameExe @GameArguments
     exit $LASTEXITCODE

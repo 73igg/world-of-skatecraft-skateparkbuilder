@@ -97,9 +97,12 @@ pub(super) fn feed_ui_input(
     // The uiScale dial folded into the seam scale.
     ui_scale: Res<super::UiScaleCvar>,
     park: Option<Res<crate::park::ParkEditor>>,
+    replay: Option<Res<crate::skate::replay::Replay>>,
 ) {
     let (keyboard, keys, capture, clipboard) = (&mut kbd.0, &kbd.1, &mut kbd.2, &mut kbd.3);
-    if park.as_ref().is_some_and(|park| park.active) {
+    if park.as_ref().is_some_and(|park| park.active)
+        || replay.as_ref().is_some_and(|replay| replay.blocks_input())
+    {
         keyboard.clear();
         capture.typing = true;
         capture.consumed.clear();

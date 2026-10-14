@@ -130,6 +130,9 @@ pub(in crate::ui_chat) fn parse_line(table: &SlashCommands, line: &str) -> Parse
         // The alias table did the `DoEmote(token)` resolve at boot: `/lol` arrives as LAUGH's id.
         Some(Command::Emote { text_id }) => ParsedChat::TextEmote(text_id),
         Some(Command::Dev(dev)) => dev_command(dev, args),
+        Some(Command::Console(name)) => ParsedChat::Console {
+            line: format!("{name} {args}"),
+        },
         // `HELP_TEXT_SIMPLE`'s case, after the drain offers the line to `SlashCmdList`.
         None => ParsedChat::Unknown,
     }

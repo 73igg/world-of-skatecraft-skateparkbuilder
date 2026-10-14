@@ -9,6 +9,8 @@ mod library;
 mod math;
 #[cfg(feature = "dev")]
 mod probe;
+mod replay;
+pub(crate) use replay::ReplaySceneReady;
 mod scene;
 mod seams;
 mod solid;
@@ -175,6 +177,7 @@ fn camera_override(
 }
 
 pub(crate) fn plugin(app: &mut App) {
+    replay::plugin(app);
     app.init_resource::<ParkEditor>()
         .init_resource::<ParkWorld>()
         .init_resource::<ParkScene>()

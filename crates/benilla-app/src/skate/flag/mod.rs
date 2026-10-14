@@ -232,6 +232,7 @@ fn prepare_destination(
     time: Res<Time>,
     mut state: ResMut<State>,
     drive: Res<SkateDrive>,
+    replay: Res<super::replay::Replay>,
     mut player: ResMut<crate::player::Player>,
     profession: super::profession::Profession,
     map: Option<Res<CurrentMap>>,
@@ -245,6 +246,10 @@ fn prepare_destination(
                 && (drive.active || profession.auras().board || state.returning.is_some())
         })
         .map(|f| [f.position[0], f.position[1]]);
+    if replay.active {
+        let position = benilla_assets::coords::bevy_to_wow(replay.actor_position());
+        retained.0 = Some([position[0], position[1]]);
+    }
     if let Some(target) = state.returning.as_mut().filter(|r| r.arrived) {
         let at = wow_to_bevy(target.flag.position);
         let tile = benilla_formats::world_to_tile(target.flag.position[0], target.flag.position[1]);

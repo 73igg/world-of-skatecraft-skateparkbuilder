@@ -532,6 +532,7 @@ dependencies = [
  "cosmic-text",
  "cpal 0.17.1",
  "crossbeam-channel",
+ "flate2",
  "fontdb",
  "half",
  "image",
@@ -651,6 +652,7 @@ dependencies = [
  "flate2",
  "num-bigint",
  "rand 0.8.6",
+ "serde",
  "sha1",
  "strum",
 ]
