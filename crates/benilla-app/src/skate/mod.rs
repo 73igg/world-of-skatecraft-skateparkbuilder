@@ -5,6 +5,7 @@
 //! is drawn under it ([`board`]). The controller is an Xbox-style pad, read by the engine itself.
 
 mod board;
+mod board_size;
 mod export;
 pub(crate) mod flag;
 mod input;
@@ -12,7 +13,9 @@ mod input_buffer;
 mod latest;
 mod profession;
 mod rails;
+pub(crate) mod replay;
 mod rig;
+pub(crate) use rig::Contact as RigContact;
 mod score;
 mod sound;
 mod work;
@@ -74,6 +77,7 @@ pub(crate) fn assets_root() -> Option<PathBuf> {
 /// the mover.
 #[derive(Resource, Default)]
 pub(crate) struct SkateDrive {
+    pub(crate) tick: u64,
     pub(crate) active: bool,
     /// Feet, Bevy world.
     pub(crate) pos: Vec3,
@@ -81,7 +85,6 @@ pub(crate) struct SkateDrive {
     pub(crate) yaw: f32,
     /// Actual skater facing, independent of the board's direction of travel.
     pub(crate) facing: f32,
-    #[cfg(feature = "dev")]
     pub(crate) offboard: bool,
     /// Horizontal speed, yd/s.
     pub(crate) speed: f32,
@@ -101,13 +104,14 @@ impl SkateDrive {
 
 /// The skater's latest solved skeleton, for the retarget and the board: bones relative to the
 /// skater's root, the root in engine space (meters from `origin`).
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub(crate) struct SkatePose {
     pub(crate) active: bool,
+    pub(crate) state: String,
     pub(crate) origin: Vec3,
     pub(crate) root: Mat4,
-    pub(crate) bones: Vec<Mat4>,
-    pub(crate) names: Vec<String>,
+    pub(crate) bones: Arc<[Mat4]>,
+    pub(crate) names: Arc<[String]>,
 }
 
 impl SkatePose {
@@ -163,11 +167,12 @@ enum Reply {
 }
 
 /// One engine pose, out of the engine's own math types (its Bevy is not ours).
+#[derive(Clone)]
 struct Frame {
     published_at: Instant,
     root: Mat4,
-    bones: Vec<Mat4>,
-    names: Vec<String>,
+    bones: Arc<[Mat4]>,
+    names: Arc<[String]>,
     camera: Option<(Vec3, Mat3)>,
     velocity: Vec3,
     tick: u64,
@@ -187,7 +192,7 @@ fn frame(p: skate_host::bridge::Pose) -> Frame {
         published_at: Instant::now(),
         root: m(p.root.to_cols_array()),
         bones: p.bones.iter().map(|b| m(b.to_cols_array())).collect(),
-        names: p.names,
+        names: p.names.into(),
         camera: p.camera.map(|(position, basis, _)| {
             (
                 Vec3::from_array(position.to_array()),
@@ -207,6 +212,8 @@ fn frame(p: skate_host::bridge::Pose) -> Frame {
 
 #[derive(Resource, Default)]
 struct Host {
+    recording: replay::Recording,
+    resume_offboard: bool,
     send: Option<work::Sender>,
     receive: Option<work::Replies>,
     input: Option<Arc<input::Sampler>>,
@@ -263,6 +270,7 @@ pub(crate) fn find_rails(tris: &[Tri]) -> Vec<Vec<[f32; 3]>> {
 
 fn spawn_worker(
     root: PathBuf,
+    recording: replay::Recording,
 ) -> std::io::Result<(work::Sender, work::Replies, Arc<input::Sampler>)> {
     let (send, jobs) = work::channel();
     let (publish, replies) = work::replies();
@@ -272,7 +280,7 @@ fn spawn_worker(
         .name("skate".into())
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            if let Err(e) = run_worker(&root, jobs, &publish, &worker_input) {
+            if let Err(e) = run_worker(&root, jobs, &publish, &worker_input, &recording) {
                 publish.send(Reply::Error(e));
             }
         })?;
@@ -285,6 +293,7 @@ fn run_worker(
     jobs: work::Receiver,
     publish: &work::Publisher,
     input: &input::Sampler,
+    recording: &replay::Recording,
 ) -> Result<(), String> {
     let mut session: Option<Session> = None;
     let (built_send, built) = latest::channel::<(u64, u64, Result<PreparedCollision, String>)>();
@@ -373,7 +382,9 @@ fn run_worker(
                         "skate: on the board in {} ms",
                         started.elapsed().as_millis()
                     );
-                    publish.send(Reply::Activated(epoch, frame(p)));
+                    let f = frame(p);
+                    recording.capture(epoch, &f);
+                    publish.send(Reply::Activated(epoch, f));
                 }
                 Job::Rebuild(e, collision) if e == epoch && active => {
                     collision_revision = collision.revision;
@@ -461,7 +472,9 @@ fn run_worker(
         if !p.root.is_finite() || p.bones.iter().any(|b| !b.is_finite()) {
             return Err("the engine published a non-finite pose".into());
         }
-        publish.send(Reply::Pose(epoch, frame(p)));
+        let f = frame(p);
+        recording.capture(epoch, &f);
+        publish.send(Reply::Pose(epoch, f));
         if last_report.elapsed() >= Duration::from_secs(10) {
             info!(
                 "skate input: ticks={} max_sample_age_ms={:.2} max_tick_ms={:.2} missed_deadlines={} discarded_samples={}",
@@ -504,6 +517,7 @@ fn gather(
 
 fn stop(host: &mut Host, drive: &mut SkateDrive, pose: &mut SkatePose) {
     host.epoch = host.epoch.wrapping_add(1);
+    host.recording.invalidate(host.epoch);
     host.activating = false;
     if let Some(send) = &host.send {
         let _ = send.send(Job::Suspend);
@@ -557,10 +571,8 @@ fn present(
     camera_distance: f32,
 ) {
     drive.pos = from_skate(frame.root.w_axis.truncate(), origin);
-    #[cfg(feature = "dev")]
-    {
-        drive.offboard = frame.state.starts_with("Biped");
-    }
+    drive.tick = frame.tick;
+    drive.offboard = frame.state.starts_with("Biped");
     let flat = Vec3::new(frame.velocity.x, 0.0, frame.velocity.z);
     let facing = frame.root.z_axis.truncate();
     if facing.x * facing.x + facing.z * facing.z > 1e-6 {
@@ -603,6 +615,7 @@ fn present(
         frame.root.z_axis,
         frame.root.w_axis.truncate().extend(1.0),
     );
+    pose.state = frame.state;
     pose.bones = frame.bones;
     pose.names = frame.names;
 }
@@ -651,10 +664,11 @@ fn update(
         Res<crate::park::ParkEditor>,
         Res<crate::park::ParkWorld>,
         Res<crate::park::ParkScene>,
+        Res<replay::Replay>,
     ),
     mut flags: ResMut<flag::State>,
 ) {
-    if park.0.active {
+    if park.0.active || park.3.active {
         if drive.active || host.activating {
             stop(&mut host, &mut drive, &mut pose);
             audio.reset();
@@ -930,12 +944,13 @@ fn start(
     host: &mut Host,
     offboard: bool,
 ) {
+    let offboard = offboard || host.resume_offboard;
     if host.send.is_none() {
         let Some(root) = assets_root() else {
             warn!("skate: no skate-data/assets found (set WOW_SKATE_ASSETS)");
             return;
         };
-        match spawn_worker(root) {
+        match spawn_worker(root, host.recording.clone()) {
             Ok((send, receive, input)) => {
                 host.send = Some(send);
                 host.receive = Some(receive);
@@ -949,7 +964,10 @@ fn start(
     }
     host.epoch = host.epoch.wrapping_add(1);
     host.activating = true;
+    host.resume_offboard = false;
     host.origin = player.pos;
+    host.recording
+        .activate(host.epoch, host.origin, park.0.scope());
     host.centre = player.pos;
     host.gathered_at = time.elapsed_secs();
     host.geometry_revision = host.geometry_revision.wrapping_add(1);
@@ -986,11 +1004,14 @@ fn start(
 pub(crate) struct SkateInputSet;
 
 pub(crate) fn plugin(app: &mut App) {
+    board_size::plugin(app);
+    replay::plugin(app);
     flag::plugin(app);
     app.init_resource::<Host>()
         .init_resource::<SkateDrive>()
         .init_resource::<SkatePose>()
         .init_resource::<board::Board>()
+        .init_resource::<rig::Contact>()
         .init_resource::<sound::SkateAudio>()
         .init_resource::<score::SkateScore>()
         .init_resource::<profession::SpeedSetting>()
@@ -1021,12 +1042,18 @@ pub(crate) fn plugin(app: &mut App) {
         .add_systems(Startup, (preload, score::spawn))
         .add_systems(
             Update,
-            (update, board::update, sound::update, score::draw)
+            (update, sound::update, score::draw)
                 .chain()
                 .in_set(SkateInputSet)
                 .in_set(WorldStage::Input)
                 .before(crate::player::PlayerControlSet)
                 .in_set(crate::char_select::InWorldGated),
+        )
+        .add_systems(
+            PostUpdate,
+            board::update
+                .in_set(benilla_world::rig_anim::PosePost)
+                .after(rig::retarget),
         )
         .add_systems(
             PostUpdate,

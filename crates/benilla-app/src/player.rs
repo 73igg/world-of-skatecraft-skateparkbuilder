@@ -33,6 +33,7 @@ pub(crate) mod camera_dynamics;
 pub(crate) mod camera_zoom;
 mod controller;
 mod skate_camera;
+pub(crate) use skate_camera::SkateCameraSet;
 mod world_focus;
 // The remembered camera pose, inside `player/` to read the rig's `pub(super)` fields.
 mod camera_saved;

@@ -64,7 +64,7 @@ index 7a54ad5..bbb3f8e 100644
  pub(crate) enum DeviceError {
      Disconnected,
 diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
-index 812f6c2..362959c 100644
+index 812f6c2..c35a778 100644
 --- a/skate/crates/skate-host/src/physics/bridge.rs
 +++ b/skate/crates/skate-host/src/physics/bridge.rs
 @@ -106,7 +106,10 @@ impl Session {
@@ -244,10 +244,19 @@ index 812f6c2..362959c 100644
  pub struct InputFrame {
      samples: [Result<crate::input::platform::DevicePacket, crate::input::platform::DeviceError>; 4],
  }
-@@ -406,9 +429,53 @@ impl ControllerTransport {
+@@ -406,9 +429,62 @@ impl ControllerTransport {
      }
  }
  impl InputFrame {
++    /// A UI-only raw snapshot; reading replay controls does not consume simulation input.
++    pub fn controls(&self) -> Option<Controls> {
++        self.samples.iter().find_map(|sample| sample.as_ref().ok().map(|packet| Controls {
++            buttons: packet.state.buttons,
++            triggers: packet.state.triggers,
++            left: packet.state.left,
++            right: packet.state.right,
++        }))
++    }
 +    /// Reserved host controls never enter the native action graph; other input is unchanged.
 +    pub fn without_buttons(mut self, mask: u16) -> Self {
 +        for packet in self.samples.iter_mut().filter_map(|p| p.as_mut().ok()) {

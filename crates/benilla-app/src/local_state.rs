@@ -91,6 +91,21 @@ pub(crate) fn park_assets_dir() -> Option<PathBuf> {
         .or_else(|| home().map(|h| h.join("park-assets")))
 }
 
+/// Private editable clips and rendered videos, never game-install or repository files.
+pub(crate) fn replays_dir() -> Option<PathBuf> {
+    home().map(|h| h.join("Replays"))
+}
+
+/// Private replay preferences, separate from editable clips and exported videos.
+pub(crate) fn replay_settings_path() -> Option<PathBuf> {
+    home().map(|h| h.join("Replays/settings.json"))
+}
+
+/// Private per-race skateboard multipliers; shared by characters using this client.
+pub(crate) fn board_sizes_path() -> Option<PathBuf> {
+    home().map(|h| h.join("skate/board-sizes.json"))
+}
+
 /// `benilla-config/macros/account.txt`: the account-wide macro tab (indices 1..=18).
 pub(crate) fn macros_account_path() -> Option<PathBuf> {
     home().map(|h| h.join("macros/account.txt"))

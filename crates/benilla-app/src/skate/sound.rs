@@ -106,7 +106,7 @@ impl SkateAudio {
 }
 
 /// `WOW_SKATE_AUDIO`, else a `skate-audio` beside or above the working directory.
-fn audio_root() -> Option<PathBuf> {
+pub(super) fn audio_root() -> Option<PathBuf> {
     std::env::var_os("WOW_SKATE_AUDIO")
         .map(PathBuf::from)
         .or_else(|| {
@@ -236,6 +236,8 @@ fn on_terrain(
 pub(super) fn update(
     time: Res<Time>,
     drive: Res<SkateDrive>,
+    replay: Res<super::replay::Replay>,
+    mut replay_state: Local<(SkateAudio, Option<f64>)>,
     mut audio: ResMut<SkateAudio>,
     config: Option<Res<crate::sound::SoundConfig>>,
     collide: WorldCollision,
@@ -243,7 +245,42 @@ pub(super) fn update(
     output: Option<NonSendMut<crate::sound::SoundOutput>>,
     mut player: Local<Player>,
 ) {
-    let cues = std::mem::take(&mut audio.cues);
+    let mut cues = std::mem::take(&mut audio.cues);
+    let replay_playing = replay.active && replay.is_playing();
+    let (active, phase, speed, position, playback) = if replay_playing {
+        let (state, previous) = &mut *replay_state;
+        let at = replay.cursor_time();
+        if previous.is_none_or(|p| at < p || at - p > 0.25) {
+            state.reset();
+        }
+        if let Some(frame) = replay.current_frame() {
+            state.observe(&frame.state, frame.velocity);
+            if previous.is_none_or(|p| at < p || at - p > 0.25) {
+                state.cues.clear();
+            }
+            cues = std::mem::take(&mut state.cues);
+            *previous = Some(at);
+            (
+                true,
+                state.phase,
+                frame.velocity.xz().length(),
+                replay.actor_position(),
+                f64::from(replay.playback_rate()),
+            )
+        } else {
+            (false, Phase::Off, 0., drive.pos, 1.)
+        }
+    } else {
+        replay_state.0.reset();
+        replay_state.1 = None;
+        (
+            drive.active,
+            audio.phase,
+            drive.speed * METERS_PER_YARD,
+            drive.pos,
+            1.,
+        )
+    };
     for cue in &cues {
         debug!("skate sound: {cue:?} in {:?}", audio.phase);
     }
@@ -253,7 +290,7 @@ pub(super) fn update(
     let Some(mixer) = output.mixer.as_mut() else {
         return;
     };
-    if !drive.active {
+    if !active {
         if player.riding {
             player.riding = false;
             for handle in player.loops.all() {
@@ -288,14 +325,12 @@ pub(super) fn update(
         player.loops.wind = start(&bank.wind, mixer);
     }
 
-    let phase = audio.phase;
-    let speed = drive.speed * METERS_PER_YARD;
     let roll = if phase.rolling() {
         (speed / 6.0).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let terrain = phase.rolling() && on_terrain(&collide, drive.pos, &surfaces);
+    let terrain = phase.rolling() && on_terrain(&collide, position, &surfaces);
     let rate = 0.7 + (speed / 12.0).min(0.8) as f64;
     let grind = |board: bool| match phase {
         Phase::Grind(b) if b == board => (0.4 + speed / 8.0).min(1.0),
@@ -312,7 +347,7 @@ pub(super) fn update(
     for (handle, (level, rate)) in player.loops.all().into_iter().zip(levels) {
         if let Some(h) = handle.as_mut() {
             h.set_volume(db(level * sfx), tween(80));
-            h.set_playback_rate(rate, tween(80));
+            h.set_playback_rate(rate * playback, tween(80));
         }
     }
 
@@ -342,7 +377,7 @@ pub(super) fn update(
         player.next_skid = now + 0.12;
     }
     for (data, gain) in shots {
-        let _ = mixer.play_2d(data.volume(db(gain * sfx)));
+        let _ = mixer.play_2d(data.volume(db(gain * sfx)).playback_rate(playback));
     }
     player.bank = Some(Some(bank));
 }

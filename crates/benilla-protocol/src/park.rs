@@ -16,7 +16,7 @@ pub const MAX_SCALE: f32 = 100.0;
 const MAX_BYTES: usize = 128;
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum Model {
     Box = 1,
@@ -75,7 +75,7 @@ impl Model {
 
 /// A primitive's local affine basis and translation. Affine data preserves shear when fusing
 /// rotated, nonuniformly scaled assemblies; no lossy TRS decomposition is used.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Part {
     pub model: Model,
     pub asset: u64,
@@ -101,7 +101,7 @@ impl Part {
         Ok(())
     }
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Definition {
     pub model: Model,
     pub asset: u64,
@@ -143,7 +143,7 @@ fn validate_parts(model: Model, count: usize) -> io::Result<()> {
 }
 
 /// Bevy world yards, quaternion XYZW, positive nonuniform scale in model-local axes.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Pose {
     pub position: [f32; 3],
     pub rotation: [f32; 4],
@@ -180,7 +180,7 @@ impl Pose {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Object {
     pub owner: u64,
     pub id: u32,

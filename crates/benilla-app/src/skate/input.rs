@@ -23,6 +23,8 @@ pub(super) struct Edge {
 
 #[derive(Default)]
 struct State {
+    gameplay_blocked: bool,
+    ui_controls: Option<skate_host::bridge::Controls>,
     #[cfg(feature = "dev")]
     injected: Option<skate_host::bridge::Controls>,
     input: InputBuffer<InputFrame, (u16, u8)>,
@@ -42,6 +44,20 @@ pub(super) struct Sampler {
 }
 
 impl Sampler {
+    pub(super) fn block_gameplay(&self, blocked: bool) {
+        let mut state = self.state.lock().unwrap();
+        if state.gameplay_blocked != blocked {
+            state.gameplay_blocked = blocked;
+            state.input.clear();
+            state.edges.clear();
+            state.flag_gesture.cancel();
+            state.flag_actions.clear();
+            state.generation = state.generation.wrapping_add(1);
+        }
+    }
+    pub(super) fn ui_controls(&self) -> Option<skate_host::bridge::Controls> {
+        self.state.lock().unwrap().ui_controls
+    }
     pub(super) fn spawn() -> std::io::Result<Self> {
         let state = Arc::new(Mutex::new(State::default()));
         let stopped = Arc::new(AtomicBool::new(false));
@@ -75,9 +91,11 @@ impl Sampler {
                             state.flag_actions.clear();
                         }
                         let held = frame.buttons();
+                        state.ui_controls = frame.controls();
                         let pressed = held & !state.buttons;
                         state.buttons = held;
-                        let allowed = state.flag_allowed && controller.is_some();
+                        let allowed =
+                            state.flag_allowed && controller.is_some() && !state.gameplay_blocked;
                         if let Some(action) = state.flag_gesture.update(
                             now.duration_since(origin).as_millis() as u64,
                             held & 0x0020 != 0,
@@ -88,7 +106,7 @@ impl Sampler {
                             }
                             state.flag_actions.push_back((now, action));
                         }
-                        if pressed != 0 {
+                        if pressed != 0 && !state.gameplay_blocked {
                             if state.edges.len() == EDGE_CAPACITY {
                                 state.edges.pop_front();
                             }
@@ -100,12 +118,17 @@ impl Sampler {
                         }
                         let generation = state.generation;
                         let key = (held, frame.gesture_key());
+                        let value = if state.gameplay_blocked {
+                            InputFrame::neutral()
+                        } else {
+                            frame.without_buttons(0x0020)
+                        };
                         state.input.push(
                             key,
                             Sample {
                                 at: now,
                                 generation,
-                                value: frame.without_buttons(0x0020),
+                                value,
                             },
                         );
                     }
@@ -175,5 +198,32 @@ impl Drop for Sampler {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(all(test, feature = "dev"))]
+mod tests {
+    use super::*;
+    #[test]
+    fn replay_keeps_raw_ui_input_but_discards_gameplay_edges() {
+        let sampler = Sampler::spawn().unwrap();
+        sampler.inject(skate_host::bridge::Controls {
+            buttons: 0x1000,
+            left: [12000, 0],
+            ..Default::default()
+        });
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(sampler.ui_controls().unwrap().buttons, 0x1000);
+        sampler.block_gameplay(true);
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(sampler.ui_controls().unwrap().left, [12000, 0]);
+        assert!(sampler.edges(Instant::now()).1.is_empty());
+        let (sample, _, _) = sampler.take(Instant::now());
+        assert_eq!(sample.unwrap().value.buttons(), 0);
+        sampler.inject(Default::default());
+        sampler.reset();
+        sampler.block_gameplay(false);
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(sampler.edges(Instant::now()).1.is_empty());
     }
 }

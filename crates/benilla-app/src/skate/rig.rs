@@ -1,6 +1,6 @@
 //! The retarget: the skater's solved skeleton onto our character's M2 skeleton, as the IW4L skate
-//! mode poses its soldier. Each mapped WoW bone's bind segment (its pivot toward its mapped child)
-//! is aligned to the reference skater's, then carried by that skater bone's solved pose. Unmapped
+//! mode poses its soldier. Rotations follow the reference skater; limb lengths and torso posture
+//! remain the target model's. A proportion-aware leg solve follows animated foot contacts. Unmapped
 //! bones (fingers, cloak, attachment points) keep their own animation under their parent: the
 //! sheath points, for one, are turned by constant animation tracks, not by their bind pose.
 //!
@@ -13,6 +13,9 @@ use benilla_world::rig_anim::RigPose;
 use bevy::prelude::*;
 
 use super::{SkatePose, METERS_PER_YARD};
+mod solve;
+#[cfg(test)]
+mod tests;
 
 #[derive(serde::Deserialize)]
 pub(super) struct ReferenceBone {
@@ -37,7 +40,7 @@ pub(super) fn reference() -> Option<&'static [ReferenceBone]> {
     .as_deref()
 }
 
-fn reference_bind(name: &str) -> Option<Mat4> {
+pub(super) fn reference_bind(name: &str) -> Option<Mat4> {
     reference()?
         .iter()
         .find(|b| b.name == name)
@@ -213,7 +216,25 @@ fn fits(maps: &[Mapping], pivots: &[Vec3]) -> Vec<Option<(&'static str, Mat4)>> 
                 segment(pivots[p.bone] * METERS_PER_YARD, from, p_to, to)
             })
             .unwrap_or(Quat::IDENTITY);
-        let rotation = turn * facing;
+        // Torso curvature and sole orientation are authored anatomy. A hoof's ankle-to-toe
+        // segment must not turn its resting sole onto a human shoe's segment direction.
+        let keep_rest_basis = matches!(
+            m.skate,
+            "HIPS"
+                | "SPINE"
+                | "SPINE2"
+                | "NECK"
+                | "HEAD"
+                | "LEFTFOOT"
+                | "RIGHTFOOT"
+                | "LEFTTOEBASE"
+                | "RIGHTTOEBASE"
+        );
+        let rotation = if keep_rest_basis {
+            facing
+        } else {
+            turn * facing
+        };
         out[m.bone] = Some((
             m.skate,
             Mat4::from_rotation_translation(rotation, to - rotation * from),
@@ -225,10 +246,12 @@ fn fits(maps: &[Mapping], pivots: &[Vec3]) -> Vec<Option<(&'static str, Mat4)>> 
 /// A rig's retarget plan, cached by its bone count and KeyBoneIDs.
 #[derive(Default)]
 pub(super) struct Plan {
+    rig_root: Option<Entity>,
     layout: Vec<i16>,
     parents: Vec<i16>,
+    binds: Vec<Vec3>,
     pivots: Vec<Vec3>,
-    fits: Vec<Option<(&'static str, Mat4)>>,
+    pub(super) fits: Vec<Option<(&'static str, Mat4)>>,
     /// Unmapped bones that ride a mapped bone other than their nearest ancestor: the hip sheath
     /// points hang off SpineLow, but sit on the pelvis, which a crouching skater's spine leaves.
     rides: Vec<Option<usize>>,
@@ -237,6 +260,7 @@ pub(super) struct Plan {
 /// The bone turns held across a ride ([`retarget`]).
 #[derive(Default)]
 pub(super) struct Held {
+    rig_root: Option<Entity>,
     rotations: Vec<Quat>,
 }
 
@@ -263,8 +287,12 @@ fn hip_riders(
 }
 
 impl Plan {
-    fn for_rig(&mut self, rig: &RigPose) -> &Self {
-        if self.layout != rig.key_bones || self.parents != rig.parents {
+    pub(super) fn for_rig(&mut self, rig: &RigPose) -> &Self {
+        if self.rig_root != Some(rig.joints_root)
+            || self.layout != rig.key_bones
+            || self.parents != rig.parents
+            || self.binds != rig.bind_translations()
+        {
             let n = rig.parents.len();
             let binds = rig.bind_translations();
             let mut pivots = vec![Vec3::ZERO; n];
@@ -283,9 +311,77 @@ impl Plan {
             self.rides = hip_riders(&rig.parents, &pivots, &rig.key_bones, &self.fits);
             self.layout = rig.key_bones.clone();
             self.parents = rig.parents.clone();
+            self.binds = binds.to_vec();
+            self.rig_root = Some(rig.joints_root);
             self.pivots = pivots;
         }
         self
+    }
+}
+
+#[derive(Resource)]
+pub(crate) struct Contact {
+    pub(crate) board_offset: Vec3,
+    pub(crate) board_scale: f32,
+    pub(crate) board_pivot: Vec3,
+    pub(crate) camera_height_offset: f32,
+}
+
+impl Default for Contact {
+    fn default() -> Self {
+        Self {
+            board_offset: Vec3::ZERO,
+            board_scale: 1.,
+            board_pivot: Vec3::ZERO,
+            camera_height_offset: 0.,
+        }
+    }
+}
+
+fn contacts(
+    contact: &mut Contact,
+    plan: &Plan,
+    rig: &RigPose,
+    pose: &SkatePose,
+    world: Mat4,
+    board_scale: f32,
+) {
+    let mapped = |name: &str| {
+        plan.fits
+            .iter()
+            .position(|f| f.is_some_and(|f| f.0 == name))
+    };
+    *contact = Contact::default();
+    contact.board_scale = board_scale;
+    if let (Some(hip), Some(source)) = (mapped("HIPS"), reference_bind("HIPS")) {
+        let height = world.transform_vector3(plan.pivots[hip]).y;
+        contact.camera_height_offset = height - source.w_axis.y / METERS_PER_YARD;
+    }
+    if matches!(pose.state.as_str(), "BipedGround" | "BipedAir") {
+        let Some(board) = pose.bone("SKATEBOARD_ROOT") else {
+            return;
+        };
+        let models = solve::compose(&plan.parents, &rig.locals);
+        let nearest = ["LEFTHAND", "RIGHTHAND"]
+            .into_iter()
+            .filter_map(|name| Some((mapped(name)?, pose.bone(name)?)))
+            .min_by(|a, b| {
+                a.1.w_axis
+                    .truncate()
+                    .distance_squared(board.w_axis.truncate())
+                    .total_cmp(
+                        &b.1.w_axis
+                            .truncate()
+                            .distance_squared(board.w_axis.truncate()),
+                    )
+            });
+        if let Some((i, hand)) = nearest {
+            contact.board_offset = world.transform_point3(models[i].translation)
+                - super::from_skate(hand.w_axis.truncate(), pose.origin);
+            // Resize a carried deck about the grip, so the hand stays attached to it.
+            contact.board_pivot = super::from_skate(hand.w_axis.truncate(), pose.origin)
+                - super::from_skate(board.w_axis.truncate(), pose.origin);
+        }
     }
 }
 
@@ -294,17 +390,55 @@ impl Plan {
 #[allow(clippy::type_complexity)]
 pub(super) fn retarget(
     pose: Res<SkatePose>,
+    replay: Res<super::replay::Replay>,
+    sizes: Res<super::board_size::BoardSizes>,
+    mut contact: ResMut<Contact>,
     mut plan: Local<Plan>,
     mut held: Local<Held>,
-    mut units: Query<(&Transform, &GlobalTransform, &mut RigPose), With<crate::net::Embodied>>,
+    mut units: Query<
+        (
+            &Transform,
+            &GlobalTransform,
+            &mut RigPose,
+            Option<&crate::net::ObjectStore>,
+        ),
+        With<crate::net::Embodied>,
+    >,
     globals: Query<&GlobalTransform>,
 ) {
+    if replay.active {
+        if let Some((_, locals)) = &replay.visual_pose {
+            if let Ok((unit_t, unit_g, mut rig, store)) = units.single_mut() {
+                if rig.locals.len() == locals.len() {
+                    rig.locals = locals.to_vec();
+                    rig.pose_dirty = true;
+                    if let Ok(frame_g) = globals.get(rig.joints_root) {
+                        let world = Mat4::from(
+                            unit_t.compute_affine()
+                                * (unit_g.affine().inverse() * frame_g.affine()),
+                        );
+                        contacts(
+                            &mut contact,
+                            plan.for_rig(&rig),
+                            &rig,
+                            &replay.pose,
+                            world,
+                            sizes.scale(store.and_then(|s| s.0.unit_race())),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    let pose = if replay.active { &replay.pose } else { &*pose };
     if !pose.active || pose.bones.is_empty() {
+        *contact = Contact::default();
         held.rotations.clear();
         return;
     }
     let count = units.iter().count();
-    let Ok((unit_t, unit_g, mut rig)) = units.single_mut() else {
+    let Ok((unit_t, unit_g, mut rig, store)) = units.single_mut() else {
         debug_once(&format!("no single embodied rig ({count})"));
         return;
     };
@@ -345,42 +479,130 @@ pub(super) fn retarget(
         .iter()
         .zip(&skins)
         .find_map(|(f, s)| f.filter(|(name, _)| *name == "HIPS").and(*s));
-    let Some(hips) = hips else {
+    let Some(_hips) = hips else {
         debug_once("no HIPS skin");
         return;
     };
     // The riders' animated turns, taken on the first ride frame, before any of ours is written:
     // a rider's local is rewritten against another bone, so it cannot be read back.
-    if held.rotations.len() != n {
+    if held.rotations.len() != n || held.rig_root != Some(rig.joints_root) {
         held.rotations = rig.locals.iter().map(|l| l.rotation).collect();
+        held.rig_root = Some(rig.joints_root);
     }
-    let mut models = vec![Mat4::IDENTITY; n];
-    for i in 0..n {
-        let parent = usize::try_from(plan.parents[i]).ok().filter(|&p| p < i);
-        let rider = plan.rides[i].filter(|&a| a < i);
-        models[i] = match (skins[i], rider, parent) {
-            (Some(skin), ..) => model_from_world * skin * Mat4::from_translation(plan.pivots[i]),
-            (None, Some(a), _) => {
-                models[a]
-                    * Mat4::from_rotation_translation(
-                        held.rotations[i],
-                        plan.pivots[i] - plan.pivots[a],
-                    )
+    let goals: Vec<_> = skins
+        .iter()
+        .enumerate()
+        .map(|(i, skin)| {
+            skin.map(|skin| {
+                Transform::from_matrix(
+                    model_from_world * skin * Mat4::from_translation(plan.pivots[i]),
+                )
+            })
+        })
+        .collect();
+    let index = |name: &str| {
+        plan.fits
+            .iter()
+            .position(|f| f.is_some_and(|f| f.0 == name))
+    };
+    let Some(hip) = index("HIPS") else {
+        return;
+    };
+    let units_per_meter = model_from_world.transform_vector3(Vec3::Y).length() / METERS_PER_YARD;
+    let legs: Vec<_> = [
+        ["LEFTUPLEG", "LEFTLEG", "LEFTFOOT"],
+        ["RIGHTUPLEG", "RIGHTLEG", "RIGHTFOOT"],
+    ]
+    .into_iter()
+    .filter_map(|names| {
+        let [thigh, knee, foot] = names.map(index);
+        let (thigh, knee, foot) = (thigh?, knee?, foot?);
+        let a = reference_bind(names[0])?.w_axis.truncate();
+        let b = reference_bind(names[1])?.w_axis.truncate();
+        let c = reference_bind(names[2])?.w_axis.truncate();
+        Some(solve::Leg {
+            thigh,
+            knee,
+            foot,
+            source_length: (a.distance(b) + b.distance(c)) * units_per_meter,
+            source_offset: (model_from_world
+                * to_world
+                * pose.bone(names[2])?
+                * reference_bind(names[2])?.inverse())
+            .transform_vector3(Vec3::Y * c.y),
+            target_sole: plan.pivots[foot].y.max(0.),
+        })
+    })
+    .collect();
+    let Some(mut locals) =
+        solve::solve(&plan.parents, &plan.binds, &rig.locals, &goals, hip, &legs)
+    else {
+        debug_once("proportion solve rejected an invalid pose");
+        return;
+    };
+    // A grabbing hand targets the animated board contact, with a reach clamp rather than stretched arms.
+    if matches!(
+        super::sound::Phase::of(&pose.state),
+        super::sound::Phase::Air | super::sound::Phase::Grind(_)
+    ) {
+        if let Some(board) = pose.bone("SKATEBOARD_ROOT") {
+            for names in [
+                ["LEFTARM", "LEFTFOREARM", "LEFTHAND"],
+                ["RIGHTARM", "RIGHTFOREARM", "RIGHTHAND"],
+            ] {
+                if let (Some(upper), Some(lower), Some(hand), Some(source)) = (
+                    index(names[0]),
+                    index(names[1]),
+                    index(names[2]),
+                    pose.bone(names[2]),
+                ) {
+                    if source.w_axis.truncate().distance(board.w_axis.truncate()) < 0.60 {
+                        solve::plant(
+                            &plan.parents,
+                            &mut locals,
+                            solve::Leg {
+                                thigh: upper,
+                                knee: lower,
+                                foot: hand,
+                                source_length: 0.,
+                                source_offset: Vec3::ZERO,
+                                target_sole: 0.,
+                            },
+                            model_from_world.transform_point3(super::from_skate(
+                                source.w_axis.truncate(),
+                                pose.origin,
+                            )),
+                        );
+                    }
+                }
             }
-            // Its animated local, unchanged, under its posed parent.
-            (None, None, Some(p)) => models[p] * rig.locals[i].to_matrix(),
-            (None, None, None) => model_from_world * hips * Mat4::from_translation(plan.pivots[i]),
-        };
-        if skins[i].is_none() && rider.is_none() && parent.is_some() {
-            continue;
         }
-        let local = match parent {
-            Some(p) => models[p].inverse() * models[i],
-            None => models[i],
-        };
-        rig.locals[i] = Transform::from_matrix(local);
     }
+    // Hip sheath anchors retain their authored turn but ride the new pelvis, not the crouched spine.
+    for i in 0..n {
+        if let Some(rider) = plan.rides[i].filter(|&a| a < i) {
+            let models = solve::compose(&plan.parents, &locals);
+            let model = models[rider].to_matrix()
+                * Mat4::from_rotation_translation(
+                    held.rotations[i],
+                    plan.pivots[i] - plan.pivots[rider],
+                );
+            let parent = usize::try_from(plan.parents[i]).ok().filter(|&p| p < i);
+            locals[i] = Transform::from_matrix(
+                parent.map_or(model, |p| models[p].to_matrix().inverse() * model),
+            );
+        }
+    }
+    rig.locals = locals;
     rig.pose_dirty = true;
+    contacts(
+        &mut contact,
+        plan,
+        &rig,
+        pose,
+        model_from_world.inverse(),
+        sizes.scale(store.and_then(|s| s.0.unit_race())),
+    );
 }
 
 /// Logs `what` once per distinct message, for chasing a silent early-out.

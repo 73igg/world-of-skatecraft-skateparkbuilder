@@ -204,6 +204,7 @@ fn builtins() -> Vec<Entry> {
 pub(super) fn tick(
     assets: Option<Res<WorldAssets>>,
     world: Res<ParkWorld>,
+    replay: Res<crate::skate::replay::Replay>,
     editor: Res<super::state::ParkEditor>,
     browser: Res<super::catalog_ui::Browser>,
     mut library: ResMut<Library>,
@@ -287,6 +288,20 @@ pub(super) fn tick(
             if p.model == benilla_protocol::park::Model::Asset {
                 protected.insert(p.asset);
                 library.request(p.asset);
+            }
+        }
+    }
+    if let Some(objects) = replay.park_objects() {
+        for object in objects.iter() {
+            if object.model == benilla_protocol::park::Model::Asset {
+                protected.insert(object.asset);
+                library.request(object.asset);
+            }
+            for part in &object.parts {
+                if part.model == benilla_protocol::park::Model::Asset {
+                    protected.insert(part.asset);
+                    library.request(part.asset);
+                }
             }
         }
     }

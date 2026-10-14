@@ -450,8 +450,12 @@
 - `WOW_REMOTE_IDLE_GATE` — benilla-app/src/net/motion/remote.rs
 - `WOW_REMOTE_SNAP` — benilla-app/src/net/motion/remote.rs
 - `WOW_RENDER_SCALE` — benilla-app/src/cvars/mod.rs, benilla-app/src/world_backdrop.rs
+- `WOW_REPLAY_PROBE` — benilla-app/src/skate/replay/probe.rs
+- `WOW_REPLAY_PROBE_ABILITY` — benilla-app/src/skate/replay/probe.rs
+- `WOW_REPLAY_PROBE_EXPORT` — benilla-app/src/skate/replay/probe.rs
 - `WOW_RESIZE` — benilla-app/src/capture/mod.rs
 - `WOW_RES_CENSUS` — benilla-app/src/perf/census.rs
+- `WOW_RETARGET_PROBE` — benilla-app/src/skate/replay/probe.rs
 - `WOW_REVEAL` — benilla-app/src/capture/probes/reveal.rs, benilla-app/src/dev.rs
 - `WOW_RIG` — benilla-app/src/capture/probe_rig.rs, benilla-app/src/dev.rs, benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/probe_shield.rs, benilla-app/src/realm_select/smoke.rs, benilla-app/src/run_mode.rs, benilla-world/src/bgwin.rs
 - `WOW_RIG_CENSUS` — benilla-world/src/rig_palette.rs
@@ -503,11 +507,11 @@
 - `WOW_UI_PROBE` — benilla-app/src/ui_pass.rs
 - `WOW_UI_SCALE` — benilla-app/src/cvars/mod.rs, benilla-app/src/ui_script/mod.rs
 - `WOW_UI_SPLICE_VERIFY` — benilla-app/src/ui_script/extract/mod.rs
-- `WOW_UNATTENDED` — benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/park/catalog_probe.rs, benilla-app/src/park/probe.rs, benilla-app/src/run_mode.rs, benilla-app/src/skate/flag/probe.rs, benilla-world/src/bgwin.rs
+- `WOW_UNATTENDED` — benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/park/catalog_probe.rs, benilla-app/src/park/probe.rs, benilla-app/src/run_mode.rs, benilla-app/src/skate/flag/probe.rs, benilla-app/src/skate/replay/probe.rs, benilla-world/src/bgwin.rs
 - `WOW_UNIT_VISUALS` — benilla-app/src/capture/probes/visual_census.rs, benilla-app/src/dev.rs
 - `WOW_UNIT_VISUALS_RADIUS` — benilla-app/src/capture/probes/visual_census.rs
 - `WOW_UPLOAD_BUDGET` — benilla-world/src/world_plugins.rs
-- `WOW_USER` — benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/run_mode.rs, benilla-app/src/skate/flag/probe.rs, benilla-protocol/examples/login_refusal_probe.rs, benilla-protocol/examples/park_probe.rs
+- `WOW_USER` — benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/run_mode.rs, benilla-app/src/skate/flag/probe.rs, benilla-app/src/skate/replay/probe.rs, benilla-protocol/examples/login_refusal_probe.rs, benilla-protocol/examples/park_probe.rs
 - `WOW_VISTA_AT` — benilla-app/src/capture/mod.rs
 - `WOW_VISTA_FACE` — benilla-app/src/capture/mod.rs
 - `WOW_VISTA_MIN` — benilla-app/src/capture/mod.rs

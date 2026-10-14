@@ -8,10 +8,14 @@ use benilla_world::{
 use bevy::prelude::*;
 use filter::{Follow, Goal};
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SkateCameraSet;
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Follow>().add_systems(
         Update,
         seat.in_set(benilla_world::schedule::WorldStage::Input)
+            .in_set(SkateCameraSet)
             .in_set(crate::char_select::InWorldGated)
             .run_if(not(resource_exists::<crate::run_mode::CaptureMode>))
             .after(super::controller::control)
@@ -22,6 +26,7 @@ pub(super) fn plugin(app: &mut App) {
 fn seat(
     time: Res<Time>,
     drive: Res<crate::skate::SkateDrive>,
+    contact: Res<crate::skate::RigContact>,
     mut follow: ResMut<Follow>,
     mut rig: ResMut<super::CameraControl>,
     options: Res<super::camera_dynamics::CameraOptions>,
@@ -30,7 +35,7 @@ fn seat(
     mut cameras: Query<(&mut Transform, &Projection), With<WorldCamera>>,
     mut trace_at: Local<f32>,
 ) {
-    let Some(native) = drive
+    let Some(mut native) = drive
         .camera
         .filter(|_| drive.active && drive.engine_camera && rig.skate_seated)
     else {
@@ -51,12 +56,13 @@ fn seat(
         _ => 0.3,
     };
     let shake = camera.translation - native.translation;
+    native.translation.y += contact.camera_height_offset;
     let output = follow.seat(
         time.delta_secs(),
         Goal {
             root: drive.pos,
             camera: native,
-            height: drive.camera_height,
+            height: (drive.camera_height + contact.camera_height_offset).max(0.15),
             distance: drive.camera_distance,
             speed: drive.speed,
             radius,

@@ -780,7 +780,7 @@ new file mode 100644
 index 00000000..ec1d439a
 --- /dev/null
 +++ b/src/game/Skatecraft.cpp
-@@ -0,0 +1,434 @@
+@@ -0,0 +1,444 @@
 +#include "Skatecraft.h"
 +#include "SkateFlag.h"
 +#include "ParkObjects.h"
@@ -822,7 +822,7 @@ index 00000000..ec1d439a
 +    constexpr uint32 ABILITIES[] = {
 +        SPELL_SUMMON_SKATEBOARD, SPELL_OLLIE_BOOST, SPELL_ROCKET_BOOST,
 +        SPELL_SPEED_DEMON, SPELL_MOON_JUMP, SPELL_SPEED_UP, SPELL_SPEED_DOWN,
-+        SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER,
++        SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER, SPELL_REPLAY,
 +    };
 +    constexpr uint16 DEFAULT_CAMERA_STEPS = 8; // half steps: 4.0 times engine framing
 +    constexpr uint16 DEFAULT_SPEED_STEPS = 3; // half steps: 1.5 times stock
@@ -903,7 +903,8 @@ index 00000000..ec1d439a
 +        AddSpell(SPELL_CAMERA_DISTANCE_DOWN, "Decrease Skate Camera Distance", ICON_ARROW_DOWN, 1, 0, 0, false);
 +        AddSpell(SPELL_CAMERA_PRESET, "Cycle Skate Camera Preset", ICON_CAMERA, 1, 0, 0, false);
 +        AddSpell(SPELL_PARK_BUILDER, "Park Builder", ICON_CAMERA, 1, 0, 0, false);
-+        for (uint32 id : {SPELL_SPEED_UP, SPELL_SPEED_DOWN, SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER})
++        AddSpell(SPELL_REPLAY, "Skate Replay", ICON_CAMERA, 1, 0, 0, false);
++        for (uint32 id : {SPELL_SPEED_UP, SPELL_SPEED_DOWN, SPELL_CAMERA_DISTANCE_UP, SPELL_CAMERA_DISTANCE_DOWN, SPELL_CAMERA_PRESET, SPELL_PARK_BUILDER, SPELL_REPLAY})
 +        {
 +            SpellEntry* spell = const_cast<SpellEntry*>(sSpellMgr.GetSpellEntry(id));
 +            spell->StartRecoveryCategory = 0;
@@ -1094,6 +1095,14 @@ index 00000000..ec1d439a
 +
 +    void OnSpellCast(Player* player, uint32 spell)
 +    {
++        if (spell == SPELL_REPLAY)
++        {
++            WorldPacket packet;
++            ChatHandler::BuildChatPacket(packet, CHAT_MSG_WHISPER, "SKATECRAFT\tR\t1", LANG_ADDON,
++                CHAT_TAG_NONE, player->GetObjectGuid(), nullptr, player->GetObjectGuid());
++            player->GetSession()->SendPacket(&packet);
++            return;
++        }
 +        if (spell == SPELL_PARK_BUILDER) { ParkObjects::Toggle(player); return; }
 +        if (spell == SPELL_CAMERA_PRESET)
 +        {
@@ -1208,6 +1217,7 @@ index 00000000..ec1d439a
 +            case SPELL_ROCKET_BOOST:
 +            case SPELL_SPEED_DEMON:
 +            case SPELL_MOON_JUMP:
++            case SPELL_REPLAY:
 +                if (!caster->HasAura(SPELL_SUMMON_SKATEBOARD))
 +                    return SPELL_FAILED_ONLY_MOUNTED;
 +                break;
@@ -1220,7 +1230,7 @@ new file mode 100644
 index 00000000..31193a32
 --- /dev/null
 +++ b/src/game/Skatecraft.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,60 @@
 +/*
 + * World of Skatecraft: Skateboarding, a secondary profession levelled by landing skate lines.
 + *
@@ -1258,6 +1268,7 @@ index 00000000..31193a32
 +    constexpr uint32 SPELL_CAMERA_DISTANCE_DOWN = 60009;
 +    constexpr uint32 SPELL_CAMERA_PRESET        = 60010;
 +    constexpr uint32 SPELL_PARK_BUILDER         = 60011;
++    constexpr uint32 SPELL_REPLAY               = 60012;
 +
 +    // After the DBC stores load: the Skateboarding skill line and its race/class rule.
 +    void LoadSkillLine();
@@ -1332,7 +1343,7 @@ index 946b1987..ec5083ca 100644
  void Spell::EffectDummy(SpellEffectIndex effIdx)
  {
 +    // Skate preferences are applied once, after the complete cast succeeds.
-+    if (m_spellInfo->Id == Skatecraft::SPELL_SPEED_UP || m_spellInfo->Id == Skatecraft::SPELL_SPEED_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_UP || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_PRESET)
++    if (m_spellInfo->Id == Skatecraft::SPELL_SPEED_UP || m_spellInfo->Id == Skatecraft::SPELL_SPEED_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_UP || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_DISTANCE_DOWN || m_spellInfo->Id == Skatecraft::SPELL_CAMERA_PRESET || m_spellInfo->Id == Skatecraft::SPELL_REPLAY)
 +        return;
 +
      if (!unitTarget && !gameObjTarget && !itemTarget && !corpseTarget)

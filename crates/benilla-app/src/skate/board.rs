@@ -149,6 +149,8 @@ fn spawn(
 /// Skins the board to this frame's skater pose, or hides it off the board.
 pub(super) fn update(
     pose: Res<SkatePose>,
+    replay: Res<super::replay::Replay>,
+    contact: Res<super::rig::Contact>,
     mut board: ResMut<Board>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -156,6 +158,7 @@ pub(super) fn update(
     mut images: ResMut<Assets<Image>>,
     mut parts: Query<(&mut Transform, &mut Visibility), With<BoardPart>>,
 ) {
+    let pose = if replay.active { &replay.pose } else { &*pose };
     let Some(model) = model() else {
         return;
     };
@@ -234,7 +237,9 @@ pub(super) fn update(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         if let Ok((mut t, mut vis)) = parts.get_mut(*entity) {
-            t.translation = anchor;
+            t.translation =
+                anchor + contact.board_offset + contact.board_pivot * (1. - contact.board_scale);
+            t.scale = Vec3::splat(contact.board_scale);
             *vis = Visibility::Visible;
         }
     }
