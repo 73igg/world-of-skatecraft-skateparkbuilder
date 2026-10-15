@@ -120,7 +120,10 @@ messages also show the effective Speed Demon multiplier and the push-speed limit
   [publishing policy](docs/source-only.md).
 - **Fresh-server installs:** no running database, characters, accounts, login credentials or
   saved player state are included. Setup initializes a new server database and asks you to
-  create your own account; the mod creates its empty preference and flag tables as needed.
+  create your own account. **Existing base-mod installs are upgraded in place:** setup backs up
+  the database, keeps accounts and characters, adds missing mod tables, and builds matching
+  patched server/database images. Existing characters learn missing abilities at login.
+  [Upgrade an existing installation](docs/database-upgrades.md).
 - **Multiplayer foundation:** shared builder objects and server-authorized flag returns are
   implemented. The complete trick/bone-pose replication work has a
   [plan](docs/skate-multiplayer-plan.md) and [protocol foundation](docs/skate-network-protocol.md);
@@ -185,6 +188,9 @@ setup.bat
 Setup checks your machine and tells you exactly what to install if something is missing, asks
 for your WoW and Skate 3 folders, converts what it needs from them, sets up the local server,
 creates your game account and builds the game. Step-by-step details: [INSTALL.md](INSTALL.md).
+If you already played the base mod, setup reuses its server and keeps your characters. To select
+it explicitly, use `setup.bat -Server "C:\original-skatecraft\server"` on Windows or
+`setup/setup.sh --server "/path/to/original-skatecraft/server"` on Linux.
 
 ## Play
 

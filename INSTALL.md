@@ -4,10 +4,18 @@
 you know what to expect. If a step fails, setup stops, says what to fix, and continues from that
 step when you run it again.
 
-A fresh clone initializes a fresh server. No developer characters, accounts, passwords, saved
+A new installation without an existing server initializes a fresh database. No developer characters, accounts, passwords, saved
 flags, or database dumps are included. Setup creates the required databases and asks you to
 create your own game account. The mod's additional tables are initialized by source code,
 without importing anyone else's player records.
+
+**Already played the base mod?** Keep your existing `server/` folder and database. Setup detects
+the existing Docker project's server folder and upgrades it in place, keeping your characters,
+accounts, passwords, gear and progress. If it cannot find that folder automatically, run
+`setup.bat -Server "C:\original-skatecraft\server"` on Windows, or
+`setup/setup.sh --server "/path/to/original-skatecraft/server"` on Linux. Use your existing login
+after setup. See [database upgrades and recovery](docs/database-upgrades.md) for standalone
+commands and backups.
 
 ## 1. Before you start
 
@@ -45,12 +53,19 @@ your system configuration.
 5. **Sets up the local server** ([vmangos](https://github.com/vmangos/core) through
    [vmangos-deploy](https://github.com/mserajnik/vmangos-deploy)) in `server/`, and extracts
    map data from your WoW client. **The extraction takes several hours** and uses a couple of CPU
-   cores; leave it running. It only happens once.
-6. **Creates your game account.** It asks for a name and a password. The account is a GM.
+   cores; leave it running. Existing server data is reused. Setup builds matching database and
+   patched server images from pinned source, backs up an existing database before changing it,
+   upgrades the deployment configuration and adds the mod's missing tables. Existing world edits
+   are kept; automatic world-database resets are disabled. Extraction uses a scratch folder and
+   mounts your WoW `Data/` read-only.
+6. **Creates your game account on a fresh database.** It asks for a name and a password. The
+   account is a GM. If accounts already exist, setup keeps them and their passwords.
 7. **Builds the game.** The first build takes several minutes. Cargo downloads the skate engine
    from its authors' repository during this step.
 
 Afterwards, start the game with `./play.sh`.
+Setup defaults to one compilation job for both Rust and the Docker server build to keep the PC
+responsive while other projects are running.
 
 ## 3. Where things are
 
@@ -58,15 +73,18 @@ Afterwards, start the game with `./play.sh`.
 |---|---|---|
 | `WoW` | a link to your WoW folder | yes, setup asks again |
 | `skate-data/`, `skate-audio/` | converted from your Skate 3 | yes, setup converts again |
-| `server/` | the server, its database (your characters) and map data | only if you want to start over: characters are lost and the maps re-extract for hours |
+| `server/` or your selected existing server folder | server configuration and map data; Docker stores characters in the database volume specified by its Compose file | keep it and its database volume |
 | `benilla-config/` | game settings, keybindings, addons (`benilla-config/AddOns/`) | yes, settings reset |
-| `.setup/`, `setup.log` | setup's tools and log | yes |
+| `.setup/database-backups/` | private database snapshots and original configuration for recovery | keep until you have verified the upgrade; copy important backups elsewhere |
+| `.setup/server-path` | the server folder used by setup and the launchers | keep when using an existing installation outside this checkout |
+| other `.setup/` files, `setup.log` | setup's tools and log | regenerable; keep account/launcher settings you want to retain |
 
 ## 4. Everyday use
 
 - Play: `./play.sh` (starts the server if it isn't running).
 - Stop the server: `docker compose -p world-of-skatecraft -f server/compose.yaml down`.
-- Update: `git pull`, then `setup/setup.sh` again (it only rebuilds).
+- Update: `git pull`, then run setup again (Windows: `setup.bat`; Linux: `setup/setup.sh`). It backs
+  up and migrates an existing database and verifies that the matching patched server runs.
 - New account or new password: `python3 tools/make_account.py <name> <password>`.
 
 ## 5. Windows (experimental)
@@ -99,3 +117,5 @@ setup issues (see the README).
 
 The folders are the same as on Linux, with `WoW` as a junction (a folder link) instead of a
 symlink. Stop the server with `docker compose -p world-of-skatecraft -f server\compose.yaml down`.
+If you selected another server folder, use its `compose.yaml` path instead. Never add `--volumes`
+to `down` unless you intend to delete your characters.
