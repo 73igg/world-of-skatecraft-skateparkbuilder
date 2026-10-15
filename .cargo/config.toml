@@ -3,3 +3,7 @@
 # `release`). Env vars still prefix it: `WOW_USER=<account> WOW_PASS=<password> cargo play`.
 [alias]
 play = "run --profile play -p benilla"
+
+# This PC also builds other projects; leave CPU and memory available for them.
+[build]
+jobs = 1

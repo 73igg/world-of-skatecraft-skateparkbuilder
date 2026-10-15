@@ -3,11 +3,13 @@
 #
 #   setup/setup.sh                       # everything, asking for the two game folders
 #   setup/setup.sh --wow DIR --skate DIR # same, without asking
+#   setup/setup.sh --server DIR          # reuse an existing installation's server folder
 #   setup/setup.sh --doctor              # only check this machine
 #
 # Every step is skipped when its result is already there, so after a failure fix the reported
 # problem and run it again. Everything is logged to setup.log.
 set -euo pipefail
+export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-1}
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
@@ -28,8 +30,7 @@ ENGINE_REV=cb79689
 CONVERTER_URL=https://raw.githubusercontent.com/Kimmo3223/2010-rust-rewrite-mashup/adb684e78ec07654f00e2a9da88d32ae02cc68bd/skate/converter/iw4l_skate_convert.py
 VGMSTREAM_URL=https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-linux.zip
 SERVER_URL=https://github.com/mserajnik/vmangos-deploy
-SERVER_REV=f0692574b7955e78d68fea39372e0045360ce5ee
-SERVER_IMAGE=ghcr.io/mserajnik/vmangos-server:5875
+SERVER_REV=df0f03e9f4a826980001cbb047a00301145744ce
 
 step() { printf '\n==> %s\n' "$*"; }
 die() {
@@ -39,11 +40,12 @@ die() {
     exit 1
 }
 
-WOW_DIR="" SKATE_DIR="" DOCTOR_ONLY=0
+WOW_DIR="" SKATE_DIR="" SERVER_DIR="" DOCTOR_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --wow) WOW_DIR=$2; shift 2 ;;
         --skate) SKATE_DIR=$2; shift 2 ;;
+        --server) SERVER_DIR=$2; shift 2 ;;
         --doctor) DOCTOR_ONLY=1; shift ;;
         -h|--help) sed -n 2,10p "$0"; exit 0 ;;
         *) die "unknown option $1" "see setup/setup.sh --help" ;;
@@ -171,44 +173,42 @@ if [ ! -f "$ROOT/skate-audio/pop_1.wav" ]; then
 fi
 
 # ── Local server ───────────────────────────────────────────────────────────────────────────────
-SERVER="$ROOT/server"
 # One fixed project name, so the server is the same Docker project whatever the folder is called.
 export SKATECRAFT_SERVER_PROJECT=${SKATECRAFT_SERVER_PROJECT:-world-of-skatecraft}
+SERVER_ARGS=()
+[ -z "$SERVER_DIR" ] || SERVER_ARGS=(--server "$SERVER_DIR")
+SERVER=$(python3 "$ROOT/setup/migrate_database.py" path "${SERVER_ARGS[@]}") || die "could not select the existing server"
+echo "  Using server: $SERVER"
 compose() { docker compose -p "$SKATECRAFT_SERVER_PROJECT" --project-directory "$SERVER" -f "$SERVER/compose.yaml" "$@"; }
 if [ ! -f "$SERVER/compose.yaml" ]; then
     step "Setting up the local vmangos server"
     [ -d "$SERVER/.git" ] || git clone --quiet "$SERVER_URL" "$SERVER"
+    git -C "$SERVER" cat-file -e "$SERVER_REV" 2>/dev/null || git -C "$SERVER" fetch --quiet origin "$SERVER_REV"
     git -C "$SERVER" checkout --quiet "$SERVER_REV"
-    cp "$SERVER/config/mangosd.conf.example" "$SERVER/config/mangosd.conf"
-    cp "$SERVER/config/realmd.conf.example" "$SERVER/config/realmd.conf"
+    [ -f "$SERVER/config/mangosd.conf" ] || cp "$SERVER/config/mangosd.conf.example" "$SERVER/config/mangosd.conf"
+    [ -f "$SERVER/config/realmd.conf" ] || cp "$SERVER/config/realmd.conf.example" "$SERVER/config/realmd.conf"
     TZ_NAME=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo Etc/UTC)
-    sed -e "s#TZ=Etc/UTC#TZ=${TZ_NAME}#" -e "s#user: 1000:1000#user: $(id -u):$(id -g)#" \
+    sed -e "s#TZ=Etc/UTC#TZ=${TZ_NAME}#" -e "s#VMANGOS_UID=1000#VMANGOS_UID=$(id -u)#" -e "s#VMANGOS_GID=1000#VMANGOS_GID=$(id -g)#" \
         "$SERVER/compose.yaml.example" > "$SERVER/compose.yaml"
 fi
-if [ ! -d "$SERVER/storage/mangosd/extracted-data/maps" ]; then
+step "Backing up and upgrading the server database (existing characters are kept)"
+python3 "$ROOT/setup/migrate_database.py" upgrade --server "$SERVER" || die "database migration stopped; see the backup path and error above"
+MAPS_READY=$(python3 "$ROOT/setup/migrate_database.py" maps-ready --server "$SERVER") || die "could not check existing map data"
+if [ "$MAPS_READY" != 1 ]; then
     step "Extracting server maps from your WoW client (this takes HOURS; leave it running)"
-    docker pull --quiet "$SERVER_IMAGE" >/dev/null
-    docker run --rm --user "$(id -u):$(id -g)" \
-        -v "$(realpath "$ROOT/WoW")":/opt/vmangos/storage/client-data \
-        -v "$SERVER/storage/mangosd/extracted-data":/opt/vmangos/storage/extracted-data \
-        "$SERVER_IMAGE" extract-client-data </dev/null ||
+    python3 "$ROOT/setup/migrate_database.py" extract --server "$SERVER" --wow "$ROOT/WoW" ||
         die "map extraction failed (see the lines above)"
 fi
-step "Building the server with the Skateboarding profession (a few minutes)"
-"$ROOT/setup/build-server.sh" "$SERVER" || die "the server build failed (see the lines above)"
 step "Starting the server"
-compose up -d
-printf '  waiting for the world server'
-for _ in $(seq 120); do
-    [ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q mangosd)" 2>/dev/null)" = healthy ] && break
-    printf '.'; sleep 5
-done
-echo
-[ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q mangosd)" 2>/dev/null)" = healthy ] ||
+compose up -d --wait --wait-timeout 600 ||
     die "the world server did not come up within 10 minutes" "look at: docker compose -p world-of-skatecraft -f server/compose.yaml logs mangosd"
+python3 "$ROOT/setup/migrate_database.py" check --live --server "$SERVER" || die "patched server verification failed"
 
 # ── Account ────────────────────────────────────────────────────────────────────────────────────
-if [ ! -f "$STATE/account" ]; then
+EXISTING_ACCOUNTS=$(python3 "$ROOT/setup/migrate_database.py" accounts --server "$SERVER") || die "could not check existing accounts"
+if [ "$EXISTING_ACCOUNTS" -gt 0 ]; then
+    echo "  Existing accounts and characters were kept. Log in with your existing username and password."
+else
     step "Game account"
     read -r -p "Account name (letters and digits): " ACCOUNT </dev/tty
     read -r -s -p "Password: " PASSWORD </dev/tty; echo
@@ -224,4 +224,4 @@ cargo build --release -p benilla || die "the build failed (see the lines above)"
 
 step "Done"
 echo "  Start the game with:  ./play.sh"
-echo "  Log in as $(cat "$STATE/account"), create a character, press J to skate (Xbox controller)."
+echo "  Log in with your account, choose your character, press J to skate (Xbox controller)."

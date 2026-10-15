@@ -5,11 +5,14 @@
     python3 tools/make_account.py <user> <password> [--gm 3] [--server server]
     python3 tools/make_account.py --check <user> <password>   # does the password match?
 
-Talks to the database container of the vmangos-deploy checkout in `server/` (Docker project
-`world-of-skatecraft`, or `$SKATECRAFT_SERVER_PROJECT`), with vmangos-deploy's default root
-password.
+Talks to the database container of the server selected during setup (Docker project
+`world-of-skatecraft`, or `$SKATECRAFT_SERVER_PROJECT`), using its configured root password.
 """
-import argparse, hashlib, os, secrets, subprocess, sys
+import argparse, hashlib, secrets, sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'setup'))
+from migrate_database import Deployment, select_server
 
 N = int('894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7', 16)
 G = 7
@@ -24,12 +27,7 @@ def verifier(user, password, salt):
 
 
 def sql(server, query):
-    out = subprocess.run(
-        ['docker', 'compose', '-p', os.environ.get('SKATECRAFT_SERVER_PROJECT', 'world-of-skatecraft'),
-         '--project-directory', server, '-f', os.path.join(server, 'compose.yaml'),
-         'exec', '-T', 'database', 'mariadb', '-uroot', '-ppassword', '-N', '-B', 'realmd', '-e', query],
-        check=True, capture_output=True, text=True)
-    return out.stdout.strip()
+    return Deployment(select_server(Path(server) if server else None)).sql('USE realmd;\n' + query)
 
 
 def valid_name(name):
@@ -41,7 +39,7 @@ def main():
     ap.add_argument('user')
     ap.add_argument('password')
     ap.add_argument('--gm', type=int, default=3)
-    ap.add_argument('--server', default=os.path.join(os.path.dirname(__file__), '..', 'server'))
+    ap.add_argument('--server', help='Existing server folder (defaults to the installation selected by setup)')
     ap.add_argument('--check', action='store_true')
     a = ap.parse_args()
     user, password = a.user.upper(), a.password

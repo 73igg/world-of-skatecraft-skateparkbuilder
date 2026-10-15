@@ -8,7 +8,10 @@ if [ -e /etc/NIXOS ] && [ -z "${IN_NIX_SHELL:-}" ]; then
     exec nix-shell "$ROOT/shell.nix" --run "$(printf '%q ' "$0" "$@")"
 fi
 [ -x target/release/benilla ] || { echo "Not built yet: run setup/setup.sh first."; exit 1; }
-docker compose -p "${SKATECRAFT_SERVER_PROJECT:-world-of-skatecraft}" --project-directory server -f server/compose.yaml up -d
+SERVER=$(python3 "$ROOT/setup/migrate_database.py" path)
+python3 "$ROOT/setup/migrate_database.py" check --server "$SERVER"
+docker compose -p "${SKATECRAFT_SERVER_PROJECT:-world-of-skatecraft}" --project-directory "$SERVER" -f "$SERVER/compose.yaml" up -d --wait --wait-timeout 180
+python3 "$ROOT/setup/migrate_database.py" check --live --server "$SERVER"
 export WOW_PARK_ASSETS="$ROOT/benilla-config/park-assets"
 CATALOG_PYTHON="$ROOT/.setup/venv/bin/python"
 if [ ! -e "$WOW_PARK_ASSETS/skate-catalog.json" ]; then

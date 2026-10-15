@@ -2,6 +2,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File setup\setup.ps1                 # everything
 #   powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Wow DIR -Skate DIR
+#   powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Server OLD\server
 #   powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Doctor         # only check this PC
 #
 # Every step is skipped when its result is already there, so after a failure fix the reported
@@ -9,10 +10,12 @@
 param(
     [string]$Wow = "",
     [string]$Skate = "",
+    [string]$Server = "",
     [switch]$Doctor
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if (-not $env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS = '1' }
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -26,8 +29,7 @@ $EngineRev = 'cb79689'
 $ConverterUrl = 'https://raw.githubusercontent.com/Kimmo3223/2010-rust-rewrite-mashup/adb684e78ec07654f00e2a9da88d32ae02cc68bd/skate/converter/iw4l_skate_convert.py'
 $VgmstreamUrl = 'https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip'
 $ServerUrl = 'https://github.com/mserajnik/vmangos-deploy'
-$ServerRev = 'f0692574b7955e78d68fea39372e0045360ce5ee'
-$ServerImage = 'ghcr.io/mserajnik/vmangos-server:5875'
+$ServerRev = 'df0f03e9f4a826980001cbb047a00301145744ce'
 if (-not $env:SKATECRAFT_SERVER_PROJECT) { $env:SKATECRAFT_SERVER_PROJECT = 'world-of-skatecraft' }
 
 function Step($text) { Write-Host ''; Write-Host "==> $text" -ForegroundColor Cyan }
@@ -165,45 +167,50 @@ if (-not (Test-Path (Join-Path $Root 'skate-audio\pop_1.wav'))) {
 }
 
 # ── Local server ───────────────────────────────────────────────────────────────────────────────
-$Server = Join-Path $Root 'server'
+$ServerArgs = @()
+if ($Server) { $ServerArgs = @('--server', $Server) }
+$Server = & python (Join-Path $Root 'setup\migrate_database.py') path @ServerArgs
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'could not select the existing server' }
+$Server = ([string]$Server).Trim()
+Write-Host "  Using server: $Server"
 $Compose = Join-Path $Server 'compose.yaml'
 function Invoke-Compose { & docker compose -p $env:SKATECRAFT_SERVER_PROJECT --project-directory $Server -f $Compose @args }
 if (-not (Test-Path $Compose)) {
     Step 'Setting up the local vmangos server'
     if (-not (Test-Path (Join-Path $Server '.git'))) { Invoke-Native 'cloning vmangos-deploy' { git clone --quiet $ServerUrl $Server } }
+    if (-not (Test-Native { git -C $Server cat-file -e $ServerRev })) {
+        Invoke-Native 'fetching the pinned deployment source' { git -C $Server fetch --quiet origin $ServerRev }
+    }
     Invoke-Native 'checking out vmangos-deploy' { git -C $Server checkout --quiet $ServerRev }
-    Copy-Item (Join-Path $Server 'config\mangosd.conf.example') (Join-Path $Server 'config\mangosd.conf')
-    Copy-Item (Join-Path $Server 'config\realmd.conf.example') (Join-Path $Server 'config\realmd.conf')
-    # The example's `user:` lines only matter on Linux hosts; its time zone stays UTC.
+    foreach ($name in 'mangosd', 'realmd') {
+        $ConfigPath = Join-Path $Server "config\$name.conf"
+        if (-not (Test-Path $ConfigPath)) { Copy-Item (Join-Path $Server "config\$name.conf.example") $ConfigPath }
+    }
     Copy-Item (Join-Path $Server 'compose.yaml.example') $Compose
 }
-if (-not (Test-Path (Join-Path $Server 'storage\mangosd\extracted-data\maps')) -and
-    -not (Test-Path (Join-Path $Server 'storage\mangosd\play-data\maps'))) {
+Step 'Backing up and upgrading the server database (existing characters are kept)'
+Invoke-Native 'database migration' { python (Join-Path $Root 'setup\migrate_database.py') upgrade --server $Server }
+$MapsReady = & python (Join-Path $Root 'setup\migrate_database.py') maps-ready --server $Server
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'could not check the existing map data' }
+if ($MapsReady -ne '1') {
     Step 'Extracting server maps from your WoW client (this takes HOURS; leave it running)'
-    Invoke-Native 'pulling the server images' { Invoke-Compose pull --quiet }
     $WowDir = (Get-Item $WowLink).Target | Select-Object -First 1
     if (-not $WowDir) { $WowDir = (Get-Content (Join-Path $State 'wow-path') -Raw).Trim() }
-    $Extracted = Join-Path $Server 'storage\mangosd\extracted-data'
     Invoke-Native 'map extraction' {
-        docker run --rm -v "${WowDir}:/opt/vmangos/storage/client-data" `
-            -v "${Extracted}:/opt/vmangos/storage/extracted-data" $ServerImage extract-client-data
+        python (Join-Path $Root 'setup\migrate_database.py') extract --server $Server --wow $WowDir
     }
 }
-Step 'Building the server with the Skatecraft mod'
-Invoke-Native 'building the patched server' { python (Join-Path $Root 'setup\build_server.py') $Server }
 Step 'Starting the server'
-Invoke-Native 'starting the server' { Invoke-Compose up -d }
-Write-Host -NoNewline '  waiting for the world server'
-function Get-Health { $id = Invoke-Compose ps -q mangosd; if ($id) { docker inspect -f '{{.State.Health.Status}}' $id } }
-for ($i = 0; $i -lt 120 -and (Get-Health) -ne 'healthy'; $i++) { Write-Host -NoNewline '.'; Start-Sleep 5 }
-Write-Host ''
-if ((Get-Health) -ne 'healthy') {
-    Stop-Setup 'the world server did not come up within 10 minutes' 'look at: docker compose -p world-of-skatecraft -f server\compose.yaml logs mangosd'
-}
+Invoke-Native 'starting the server' { Invoke-Compose up -d --wait --wait-timeout 600 }
+Invoke-Native 'verifying the patched server and database' { python (Join-Path $Root 'setup\migrate_database.py') check --live --server $Server }
 
 # ── Account ────────────────────────────────────────────────────────────────────────────────────
 $AccountFile = Join-Path $State 'account'
-if (-not (Test-Path $AccountFile)) {
+$ExistingAccounts = & python (Join-Path $Root 'setup\migrate_database.py') accounts --server $Server
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'could not check existing accounts' }
+if ([int]$ExistingAccounts -gt 0) {
+    Write-Host '  Existing accounts and characters were kept. Log in with your existing username and password.'
+} else {
     Step 'Game account'
     $account = Read-Host 'Account name (letters and digits)'
     $secret = Read-Host 'Password' -AsSecureString
@@ -224,8 +231,10 @@ if (Test-Path $PlayerFile) {
     $Player = Get-Content $PlayerFile -Raw | ConvertFrom-Json
     if ($Player.character) { Write-Host "  Your character $($Player.character) loads automatically. Press J to skate." }
     else { Write-Host '  Login is automatic. Create a character, then press J to skate.' }
-} else {
+} elseif (Test-Path $AccountFile) {
     Write-Host "  Log in as $((Get-Content $AccountFile -Raw).Trim()), create a character, press J to skate."
+} else {
+    Write-Host '  Log in with your existing account and choose your character. Missing skate abilities are learned at login.'
 }
 if (Test-Path (Join-Path $State 'steam-game.json')) { Write-Host '  PlayStation controller support is configured through Steam Input.' }
 Stop-Transcript | Out-Null

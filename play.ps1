@@ -22,34 +22,38 @@ try {
         }
     }
 
-    $serverDataFolder = 'server\storage\mangosd\extracted-data'
+    $ServerPathFile = Join-Path $PSScriptRoot '.setup\server-path'
+    $Server = if (Test-Path -LiteralPath $ServerPathFile) { (Get-Content -LiteralPath $ServerPathFile -Raw).Trim() } else { Join-Path $PSScriptRoot 'server' }
     $stagedDataMarker = Join-Path $PSScriptRoot '.setup\play-data-active'
     if (Test-Path -LiteralPath $stagedDataMarker) {
-        $serverDataFolder = 'server\storage\mangosd\play-data'
         if ((Test-Path -LiteralPath '.setup\maps-ready') -and (Test-Path -LiteralPath '.setup\pathfinding-verified')) {
-            $finalDataFolder = Join-Path $PSScriptRoot 'server\storage\mangosd\extracted-data'
+            $finalDataFolder = Join-Path $Server 'storage\mangosd\extracted-data'
             foreach ($folder in 'maps', 'vmaps', 'mmaps', '5875\dbc') {
                 if (-not (Get-ChildItem -LiteralPath (Join-Path $finalDataFolder $folder) -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
                     throw 'The completed server data is missing files.'
                 }
             }
-            $composePath = Join-Path $PSScriptRoot 'server\compose.yaml'
+            $composePath = Join-Path $Server 'compose.yaml'
             $composeContent = [IO.File]::ReadAllText($composePath)
-            [IO.File]::WriteAllText($composePath, $composeContent.Replace('./storage/mangosd/play-data:/opt/vmangos/storage/data:ro', './storage/mangosd/extracted-data:/opt/vmangos/storage/data:ro'), (New-Object Text.UTF8Encoding($false)))
-            $serverConfigPath = Join-Path $PSScriptRoot 'server\config\mangosd.conf'
+            if ($composeContent.TrimStart().StartsWith('{')) {
+                $composeConfig = $composeContent | ConvertFrom-Json
+                foreach ($mount in $composeConfig.services.mangosd.volumes) {
+                    if ($mount.target -eq '/opt/vmangos/storage/data') { $mount.source = $finalDataFolder.Replace('$', '$$') }
+                }
+                $composeContent = $composeConfig | ConvertTo-Json -Depth 100
+            } else {
+                $composeContent = $composeContent.Replace('./storage/mangosd/play-data:/opt/vmangos/storage/data:ro', './storage/mangosd/extracted-data:/opt/vmangos/storage/data:ro')
+            }
+            [IO.File]::WriteAllText($composePath, $composeContent, (New-Object Text.UTF8Encoding($false)))
+            $serverConfigPath = Join-Path $Server 'config\mangosd.conf'
             $serverConfig = [IO.File]::ReadAllText($serverConfigPath)
             [IO.File]::WriteAllText($serverConfigPath, ($serverConfig -replace '(?m)^mmap.enabled = 0\r?$', 'mmap.enabled = 1'), (New-Object Text.UTF8Encoding($false)))
             Remove-Item -LiteralPath $stagedDataMarker
-            $serverDataFolder = 'server\storage\mangosd\extracted-data'
         }
     }
-    $requiredAssets = @('WoW\Data', 'skate-data\assets\rig.json', 'skate-data\assets\board.json', 'skate-audio\pop_1.wav', 'server\compose.yaml')
-    $requiredAssets += @('maps', 'vmaps', 'mmaps', '5875\dbc') | ForEach-Object { Join-Path $serverDataFolder $_ }
+    $requiredAssets = @('WoW\Data', 'skate-data\assets\rig.json', 'skate-data\assets\board.json', 'skate-audio\pop_1.wav', (Join-Path $Server 'compose.yaml'))
     foreach ($asset in $requiredAssets) {
-        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $asset))) {
-            if ($asset.StartsWith('server\storage\mangosd\')) {
-                throw 'The server maps are still being prepared. Launch again after setup finishes.'
-            }
+        if (-not (Test-Path -LiteralPath $asset)) {
             throw 'Game setup is incomplete. Run setup.bat first.'
         }
     }
@@ -90,12 +94,18 @@ try {
     }
 
     $serverProject = if ($env:SKATECRAFT_SERVER_PROJECT) { $env:SKATECRAFT_SERVER_PROJECT } else { 'world-of-skatecraft' }
+    $MapsReady = & python (Join-Path $PSScriptRoot 'setup\migrate_database.py') maps-ready --server $Server
+    if ($LASTEXITCODE -ne 0 -or $MapsReady -ne '1') { throw 'Server map data is incomplete. Run setup.bat.' }
+    & python (Join-Path $PSScriptRoot 'setup\migrate_database.py') check --server $Server
+    if ($LASTEXITCODE -ne 0) { throw 'The server needs upgrading. Run setup.bat to preserve and migrate your database.' }
     Write-Host 'Starting the local server...'
     $ErrorActionPreference = 'Continue'
-    & $dockerExe compose -p $serverProject --project-directory server -f server\compose.yaml up -d --wait --wait-timeout 180
+    & $dockerExe compose -p $serverProject --project-directory $Server -f (Join-Path $Server 'compose.yaml') up -d --wait --wait-timeout 180
     $serverStartExit = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     if ($serverStartExit -ne 0) { throw 'The local server could not start. See the message above.' }
+    & python (Join-Path $PSScriptRoot 'setup\migrate_database.py') check --live --server $Server
+    if ($LASTEXITCODE -ne 0) { throw 'The patched server/database verification failed. Run setup.bat.' }
 
     if ($Check) {
         Write-Host 'World of Skatecraft is ready to launch.'

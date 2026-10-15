@@ -15,3 +15,12 @@ catalogues the tests check against, `scripts/` the gates and instruments, `third
 vendored code.
 
 @docs/METHOD.md
+
+## Shared computer resources
+
+The owner runs other Rust projects on this PC. Check active compilers and available memory
+before compiling. Use `CARGO_BUILD_JOBS=1` (or `--jobs 1`) for this checkout, and one job for
+Docker/C++ server builds. Do not overlap this task's builds. Continue the work while monitoring
+memory, responsiveness and run time; reassess concurrency or scope if usage becomes excessive.
+Account for other projects' builds and never stop their processes. Report any checks deferred
+for resource limits.

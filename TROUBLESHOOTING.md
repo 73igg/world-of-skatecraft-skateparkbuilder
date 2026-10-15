@@ -4,6 +4,20 @@ Start with `setup/setup.sh --doctor`. Setup also writes everything it did to `se
 
 ## Setup
 
+**"This image expects VMANGOS_DEPLOY_VERSION=1, but the variable is not set".** The upstream
+Docker images changed while the old setup still used the earlier deployment configuration.
+Pull this fork's latest code and rerun `setup.bat` (Windows) or `setup/setup.sh` (Linux). Setup
+backs up your existing database, upgrades the complete configuration (including container users,
+database credentials and extraction paths), and builds a matching pinned server/database pair.
+Adding the version variable alone does not apply those other changes. Keep your database volume.
+[Existing-install upgrade and recovery](docs/database-upgrades.md).
+
+**Characters are present but the new abilities are missing.** This can happen if the client is
+connected to the base server. Run `python setup/migrate_database.py check --live` (Linux:
+`python3`) to verify the actual running images and migration. Rerun setup to upgrade, then log
+out and back in to teach missing spells. Look in the General spellbook tab; existing action bars
+are preserved. Do not import another player's database or manually add spell rows to a base server.
+
 **"MISSING ..." in the doctor.** Run the `fix:` line printed under it, open a new terminal, run
 setup again.
 
