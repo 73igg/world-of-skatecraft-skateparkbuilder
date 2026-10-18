@@ -192,6 +192,11 @@ pub(crate) const REGISTERED: &[Registered] = &[
     // gives it a checkbox.
     same("useUiScale", "0"),
     same("farclip", "350"),
+    ours(
+        "distanceFog",
+        "1",
+        "skate filming control; the reference always applies authored distance fog",
+    ),
     // `nearclip` (`0x68867a`: name `0x84ffb0`, default `0x84fb48` "0.1", flags 1, callback
     // `0x688d90`, record `[0xc7f348]`). The camera re-reads the record every frame: `0x511bc0`
     // (sole caller `0x483094`) stamps `[cam+0x38]` from it through the handle `[0xbe1078]` that

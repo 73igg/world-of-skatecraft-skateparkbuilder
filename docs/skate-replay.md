@@ -31,6 +31,8 @@ the skateboard, after held controls have been released.
 | Jump to start / end | Home / End | Use the timeline |
 | Save camera key / cut | T / Shift-T | Square / X saves a key |
 | Previous / next camera key | Page Up / Page Down | Use the editor buttons |
+| Key motion | Select a key, then Key motion | Use the editor button |
+| Free camera speed / response | Move slower / Move faster / Move response | Use the editor buttons |
 | Remove selected key | Delete | Use the editor button |
 | Save / saved clips / export | Ctrl-S / Ctrl-O / Ctrl-E | Use the editor buttons |
 
@@ -43,6 +45,24 @@ speed. Slower / Faster scales the entire clip; Key slower / Key faster adjusts o
 you have selected with Previous / Next key. A cut holds the preceding shot until the cut time. Recorded camera mode uses the final
 camera actually shown during skating, including collision and smoothing.
 
+New camera keys use Smooth continuous motion: position, rotation and zoom flow through
+intermediate keys, with a stop at each end of the shot. Select a key and use Key motion to
+cycle its outgoing segment through Smooth continuous, Linear, and Ease in/out. Linear moves
+directly between keys; Ease in/out stops at each key. Cuts hold the preceding shot and reset
+the smoothing across the cut. Existing saved clips retain their original Ease in/out motion.
+Smooth paths can curve outside the straight line between keys; preview shots near obstacles.
+
+Free camera Move slower / Move faster adjusts travel speed from 1 to 64 yards per second.
+Shift (either key) or left stick click doubles that speed. Move response cycles Direct,
+Smooth and Soft acceleration and braking. These controls affect free camera movement, not
+the skater or clip playback speed. Speed and response are remembered between launches.
+
+Graphics options allow Terrain Distance from 177 to 3,000 yards, including while editing and
+exporting replays. Turn Distance Fog off for a clear view to that range; the sky and coarse
+horizon silhouettes retain their colours. Both settings are remembered locally. Longer
+distances load more map tiles and objects, increasing memory use and reducing frame rate;
+this does not load the entire continent. The defaults remain 350 yards with distance fog on.
+
 ## Saved clips and video
 
 Editable `.skate-replay` clips and exported MP4 files go in `benilla-config/Replays`, beneath
@@ -50,7 +70,7 @@ this checkout's central local-state folder. This directory is ignored by Git. Cl
 motion, final character joint poses, camera tracks, and historical builder definitions. They
 contain no model meshes, textures, extracted sounds, accounts, credentials or install paths.
 All referenced models and sounds are loaded from the user's own game conversions.
-The recording-window preference is stored separately in `benilla-config/Replays/settings.json`.
+Recording-window and free-camera preferences are stored in `benilla-config/Replays/settings.json`.
 Skate Replay is learned at character creation and on login, appears in the General spellbook,
 and can be placed on an action bar. The ability opens the same editor as F6.
 

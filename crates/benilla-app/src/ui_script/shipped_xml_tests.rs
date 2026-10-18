@@ -1528,7 +1528,7 @@ fn the_stock_video_options_window_loads_hidden_and_owns_its_own_name() {
         "the stock Video window must never be on screen"
     );
 
-    // The stock nine slider rows, and our Graphics page standing on them.
+    // The stock nine slider rows stay intact; our Graphics page extends Terrain Distance.
     assert_eq!(
         s.eval::<f64>("return table.getn(OptionsFrameSliders)")
             .unwrap() as i32,
@@ -1552,10 +1552,9 @@ fn the_stock_video_options_window_loads_hidden_and_owns_its_own_name() {
         (
             s.eval::<f64>("return OptionsFrameSliders[2].minValue")
                 .unwrap(),
-            s.eval::<f64>("return OptionsFrameSliders[2].maxValue")
-                .unwrap()
+            *benilla_world::view::FARCLIP_RANGE.end() as f64
         ),
-        "our row is built from the REFERENCE's row 2, not from a transcription of it"
+        "our row keeps the reference minimum and exposes the extended drawing range"
     );
 
     // The display verbs, at the shapes their consumers read.

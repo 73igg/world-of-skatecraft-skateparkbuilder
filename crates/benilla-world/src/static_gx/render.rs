@@ -72,10 +72,10 @@ pub(crate) struct GxCellDraw {
     pub sets: Vec<std::sync::Arc<[u16]>>,
 }
 
-/// Marks the world camera, the one view the pass draws into, so no portrait-booth view gets
-/// world cells.
+/// Opts a view into retained map geometry. Additional views must mirror the world's pose,
+/// projection, HDR and MSAA: they share its visibility lists and pipeline specialization.
 #[derive(Component, Clone, Copy, Default, ExtractComponent)]
-pub(crate) struct StaticGxView;
+pub struct StaticGxView;
 
 /// Mark the world camera, again whenever it respawns.
 fn mark_world_camera(

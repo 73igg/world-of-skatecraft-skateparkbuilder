@@ -28,6 +28,9 @@ enum Action {
     Seek(f64),
     Camera,
     CameraPath,
+    KeyInterpolation,
+    FlySpeed(f32),
+    FlyResponse,
     In,
     Out,
     ResetTrim,
@@ -57,6 +60,8 @@ pub(crate) struct Replay {
     fov: f32,
     mode: Mode,
     camera: Transform,
+    fly: camera::FlySettings,
+    fly_velocity: Vec3,
     keys: Vec<Keyframe>,
     status: String,
     library_open: bool,
@@ -83,6 +88,8 @@ type DiskResult = Result<(Option<files::Clip>, String), String>;
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Preferences {
     window_seconds: f64,
+    #[serde(default)]
+    fly: camera::FlySettings,
 }
 
 fn load_preferences(mut replay: ResMut<Replay>, host: Res<Host>) {
@@ -90,6 +97,7 @@ fn load_preferences(mut replay: ResMut<Replay>, host: Res<Host>) {
         .and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice::<Preferences>(&bytes).ok());
     if let Some(preferences) = preferences {
+        replay.fly = preferences.fly.sanitize();
         if preferences.window_seconds.is_finite() {
             replay.window = preferences
                 .window_seconds
@@ -99,12 +107,13 @@ fn load_preferences(mut replay: ResMut<Replay>, host: Res<Host>) {
     host.recording.set_window(replay.window);
 }
 
-fn save_preferences(seconds: f64) -> Result<(), String> {
+fn save_preferences(replay: &Replay) -> Result<(), String> {
     let Some(path) = crate::local_state::replay_settings_path() else {
         return Ok(());
     };
     let bytes = serde_json::to_vec(&Preferences {
-        window_seconds: seconds,
+        window_seconds: replay.window,
+        fly: replay.fly,
     })
     .map_err(|e| e.to_string())?;
     crate::local_state::write_atomic_bytes(&path, &bytes).map_err(|e| e.to_string())
@@ -136,6 +145,8 @@ impl Default for Replay {
             fov: 60_f32.to_radians(),
             mode: Mode::Recorded,
             camera: Transform::IDENTITY,
+            fly: default(),
+            fly_velocity: Vec3::ZERO,
             keys: Vec::new(),
             status: String::new(),
             library_open: false,
@@ -199,6 +210,7 @@ impl Replay {
         self.playing && self.exporting.is_none()
     }
     fn seek(&mut self, at: f64) {
+        self.fly_velocity = Vec3::ZERO;
         self.playing = false;
         self.cursor = at.clamp(self.in_point, self.out_point);
         self.preview_keys = true;
@@ -233,6 +245,7 @@ impl Replay {
             );
         }
         self.mode = clip.camera_settings.mode;
+        self.fly_velocity = Vec3::ZERO;
         self.camera = camera::transform(clip.camera_settings.pose);
         self.fov = clip.camera_settings.fov;
         self.path_enabled = clip.camera_settings.use_keys;
@@ -309,6 +322,7 @@ impl Replay {
         }
     }
     pub(super) fn exit(&mut self, host: &mut Host) {
+        self.fly_velocity = Vec3::ZERO;
         self.active = false;
         self.playing = false;
         self.releasing = true;
@@ -637,6 +651,7 @@ fn controls(
                 }
             }
             Action::Play if replay.active => {
+                replay.fly_velocity = Vec3::ZERO;
                 if replay.cursor >= replay.out_point {
                     replay.cursor = replay.in_point;
                 }
@@ -659,12 +674,14 @@ fn controls(
                 }
             }
             Action::Camera if replay.active => {
+                replay.fly_velocity = Vec3::ZERO;
                 replay.preview_keys = false;
                 replay.path_enabled = false;
                 replay.mode = replay.mode.next();
                 replay.follow_offset = replay.camera.translation - replay.target();
             }
             Action::CameraPath if replay.active => {
+                replay.fly_velocity = Vec3::ZERO;
                 replay.path_enabled = !replay.path_enabled;
                 replay.preview_keys = true;
                 replay.status = if replay.path_enabled {
@@ -729,7 +746,7 @@ fn controls(
                     "Recording window: {:.0}s. Longer windows use footage still available; discarded footage cannot be recovered.",
                     replay.window
                 );
-                if let Err(error) = save_preferences(replay.window) {
+                if let Err(error) = save_preferences(&replay) {
                     replay.status = format!("Window changed, but could not be remembered: {error}");
                 }
             }
@@ -742,6 +759,31 @@ fn controls(
                     replay.status = "Seek to a camera key before adjusting its speed".into();
                 }
             }
+            Action::KeyInterpolation if replay.active => {
+                let at = replay.cursor;
+                if let Some(key) = replay.keys.iter_mut().find(|k| (k.at - at).abs() < 0.05) {
+                    key.interpolation = key.interpolation.next();
+                    replay.status =
+                        format!("Outgoing camera motion: {}", key.interpolation.label());
+                } else {
+                    replay.status = "Seek to a camera key before changing its motion".into();
+                }
+            }
+            Action::FlySpeed(factor) if replay.active => {
+                replay.fly.speed = (replay.fly.speed * factor).clamp(1., 64.);
+                if let Err(error) = save_preferences(&replay) {
+                    replay.status =
+                        format!("Camera speed changed, but could not be remembered: {error}");
+                }
+            }
+            Action::FlyResponse if replay.active => {
+                replay.fly.response = replay.fly.response.next();
+                replay.fly_velocity = Vec3::ZERO;
+                if let Err(error) = save_preferences(&replay) {
+                    replay.status =
+                        format!("Camera response changed, but could not be remembered: {error}");
+                }
+            }
             Action::Fov(delta) if replay.active => {
                 replay.playing = false;
                 if replay.mode == Mode::Recorded {
@@ -751,9 +793,15 @@ fn controls(
                 replay.fov = (replay.fov + delta).clamp(5_f32.to_radians(), 150_f32.to_radians());
             }
             Action::Keyframe(cut) if replay.active => {
+                replay.fly_velocity = Vec3::ZERO;
                 replay.sample_pose();
                 replay.path_enabled = true;
                 let at = replay.cursor;
+                let interpolation = replay
+                    .keys
+                    .iter()
+                    .find(|k| (k.at - at).abs() <= 0.015)
+                    .map_or(camera::Interpolation::Smooth, |k| k.interpolation);
                 replay.keys.retain(|k| (k.at - at).abs() > 0.015);
                 if replay.keys.len() < 512 {
                     let key = Keyframe {
@@ -762,6 +810,7 @@ fn controls(
                         fov: replay.fov,
                         rate: replay.rate,
                         cut,
+                        interpolation,
                     };
                     replay.keys.push(key);
                     replay.keys.sort_by(|a, b| a.at.total_cmp(&b.at));
@@ -849,15 +898,15 @@ fn controls(
                 - f32::from(
                     controls.buttons & 0x0100 != 0 || (keyboard && keys.pressed(KeyCode::KeyQ)),
                 );
-        let speed = if controls.buttons & 0x0040 != 0 || keys.pressed(KeyCode::ShiftLeft) {
-            18.
-        } else {
-            4.
-        };
-        replay.camera.translation +=
-            (Quat::from_rotation_y(yaw) * Vec3::new(x, 0., -z) + Vec3::Y * y).clamp_length_max(1.)
-                * dt
-                * speed;
+        let fast = controls.buttons & 0x0040 != 0
+            || keys.pressed(KeyCode::ShiftLeft)
+            || keys.pressed(KeyCode::ShiftRight);
+        let direction = Quat::from_rotation_y(yaw) * Vec3::new(x, 0., -z) + Vec3::Y * y;
+        let fly = replay.fly;
+        let movement = fly.movement(&mut replay.fly_velocity, direction, fast, dt);
+        replay.camera.translation += movement;
+    } else {
+        replay.fly_velocity = Vec3::ZERO;
     }
 }
 

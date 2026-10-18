@@ -20,10 +20,20 @@ const SWEEP_SECS: f32 = 1.0;
 /// Five ADT tiles (2667 yd), the smallest round tile multiple clear of [`radius_floor`].
 const DEFAULT_RADIUS_YD: f32 = 5.0 * TILE_SIZE;
 
-/// The far corner of the widest tile block the residency window keeps (at the `farclip` clamp's
-/// maximum), plus a tile: a stamp is where the viewer stood, so no smaller radius is safe.
+/// The far corner at the reference's maximum view distance, plus a tile. Extended skate filming
+/// distances grow this floor at sweep time, without retaining more art at ordinary distances.
 fn radius_floor() -> f32 {
-    crate::terrain_stream::window::max_resident_reach_yd(*crate::view::FARCLIP_RANGE.end())
+    crate::terrain_stream::window::max_resident_reach_yd(777.0)
+}
+
+fn radius_for_view(configured: f32, farclip: f32) -> f32 {
+    if configured <= 0.0 {
+        configured
+    } else {
+        configured.max(crate::terrain_stream::window::max_resident_reach_yd(
+            farclip,
+        ))
+    }
 }
 
 /// `$WOW_ART_RADIUS` in yards (`0` or less turns eviction off); a value under [`radius_floor`] is
@@ -145,14 +155,18 @@ impl ArtScopeState {
 pub struct ArtScope<'w> {
     state: Res<'w, ArtScopeState>,
     census: ResMut<'w, ArtCensus>,
+    view: Option<Res<'w, crate::view::ViewDistance>>,
 }
 
 impl ArtScope<'_> {
     /// Sweeps one cache on sweep frames and records its residency.
     pub fn apply<K: Eq + Hash, V>(&mut self, cache: &mut SpatialCache<K, V>, slot: ArtSlot) {
+        let radius = self.view.as_ref().map_or(self.state.radius, |view| {
+            radius_for_view(self.state.radius, view.farclip)
+        });
         let dropped = match self.state.focus {
             Some(focus) if self.state.due && self.state.radius > 0.0 => {
-                cache.scope(focus, self.state.radius, self.state.now)
+                cache.scope(focus, radius, self.state.now)
             }
             _ => 0,
         };
@@ -163,7 +177,7 @@ impl ArtScope<'_> {
             debug!(
                 "art-scope: dropped {dropped} {} entries beyond {:.0} yd ({} live)",
                 slot.column(),
-                self.state.radius,
+                radius,
                 cache.len()
             );
         }
@@ -215,6 +229,18 @@ impl Plugin for ArtScopePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extended_view_keeps_its_resident_art_without_growing_the_normal_floor() {
+        assert_eq!(radius_for_view(DEFAULT_RADIUS_YD, 350.0), DEFAULT_RADIUS_YD);
+        let extended = radius_for_view(DEFAULT_RADIUS_YD, *crate::view::FARCLIP_RANGE.end());
+        assert!(extended > DEFAULT_RADIUS_YD);
+        assert_eq!(
+            extended,
+            crate::terrain_stream::window::max_resident_reach_yd(3000.0)
+        );
+        assert_eq!(radius_for_view(0.0, 3000.0), 0.0);
+    }
 
     #[test]
     fn the_radius_clears_the_streamers_own_reach() {

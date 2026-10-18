@@ -1,4 +1,4 @@
-//! The residency window, derived from `farclip` (177..777) as the reference derives it:
+//! The residency window, derived from `farclip` (extended to 3000 for skate filming) as the reference derives it:
 //! `SetFarClip` (`0x6725d0`) sets `r = 1 + trunc(farclip / 33.333)` chunks, and the world tick
 //! (`0x672730`) centres two windows on the viewer's chunk, the inner `idx ± r` (must be resident)
 //! and the outer `idx ± max(r + 2, 8)` (requested ahead, built under 5 ms a frame). Eviction is
@@ -104,6 +104,22 @@ pub fn max_resident_reach_yd(farclip: f32) -> f32 {
 mod tests {
     use super::*;
     use benilla_formats::tile_to_world;
+
+    #[test]
+    fn extended_view_streams_beyond_777_and_stays_inside_the_map() {
+        let extended = at_chunk(3000.0, (32, 32), (7, 7));
+        assert!(
+            extended.wanted_tiles().len() > at_chunk(777.0, (32, 32), (7, 7)).wanted_tiles().len()
+        );
+        assert!(extended.outer as f32 * CHUNK_SIZE > 3000.0);
+        for tile in [(0, 0), (32, 32), (63, 63)] {
+            let window = at_chunk(3000.0, tile, (7, 7));
+            for t in window.wanted_tiles() {
+                assert!((0..64).contains(&t.0) && (0..64).contains(&t.1));
+                assert!(window.keeps(t));
+            }
+        }
+    }
 
     /// 350 is the registered default; at 177 the outer window sits on its 8-chunk floor.
     #[test]

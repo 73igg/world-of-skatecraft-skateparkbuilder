@@ -968,8 +968,7 @@ fn defaults_resets_the_audio_page_to_registered_defaults() {
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
 }
 
-/// The two 1.12 sliders read the table: uiScale over 0.64..1.0 in percent, farclip over 177..777
-/// in yards (`OptionsFrame.lua:25-26`).
+/// UI Scale reads the stock table in percent; the extended Terrain Distance reads yards.
 #[test]
 fn the_graphics_page_reads_the_cvar_table_on_select() {
     benilla_formats::wow_data_or_skip!();
@@ -1617,9 +1616,9 @@ fn a_pending_ui_scale_survives_the_page_switch_and_dies_on_hide() {
     assert!(s.errors().is_empty(), "script errors: {:?}", s.errors());
 }
 
-/// A live row on 1.12's grid, 177 + n * 60 (`OptionsFrame.lua:26`), so 300 lands on 297.
+/// The extended filming range writes live, including its maximum, without staging an Apply.
 #[test]
-fn the_terrain_distance_slider_snaps_to_the_1_12_grid_and_writes_live() {
+fn extended_terrain_distance_and_fog_write_live() {
     benilla_formats::wow_data_or_skip!();
     let mut s = harness_on(audio_harness());
     s.run("ShowUIPanel(BenillaOptionsFrame)").unwrap();
@@ -1634,7 +1633,7 @@ fn the_terrain_distance_slider_snaps_to_the_1_12_grid_and_writes_live() {
         .unwrap();
     assert!(s
         .eval::<bool>(
-            "return math.abs(BenillaOptionsFrameContainerBodyGraphicsRowFarclipControlSlider:GetValue() - 297) < 0.001"
+            "return math.abs(BenillaOptionsFrameContainerBodyGraphicsRowFarclipControlSlider:GetValue() - 300) < 0.001"
         )
         .unwrap());
     assert_eq!(
@@ -1642,12 +1641,31 @@ fn the_terrain_distance_slider_snaps_to_the_1_12_grid_and_writes_live() {
             "return BenillaOptionsFrameContainerBodyGraphicsRowFarclipControlValue:GetText()"
         )
         .unwrap(),
-        "297"
+        "300"
     );
     assert_eq!(
         s.take_cvar_changes(),
-        vec![("farclip".to_string(), "297".to_string())]
+        vec![("farclip".to_string(), "300".to_string())]
     );
+    s.run("BenillaOptionsFrameContainerBodyGraphicsRowFarclipControlSlider:SetValue(3000)")
+        .unwrap();
+    assert_eq!(
+        s.take_cvar_changes(),
+        vec![("farclip".to_string(), "3000".to_string())]
+    );
+    s.run("BenillaOptionsFrameContainerBodyGraphicsRowDistanceFogCheck:Click()")
+        .unwrap();
+    assert_eq!(
+        s.take_cvar_changes(),
+        vec![("distanceFog".to_string(), "0".to_string())]
+    );
+    s.run("HideUIPanel(BenillaOptionsFrame) ShowUIPanel(BenillaOptionsFrame)")
+        .unwrap();
+    assert!(!s
+        .eval::<bool>(
+            "return BenillaOptionsFrameContainerBodyGraphicsRowDistanceFogCheck:GetChecked()"
+        )
+        .unwrap());
     assert!(
         !s.eval::<bool>("return BenillaOptionsFrameApplyButton:IsVisible()")
             .unwrap(),
@@ -1687,15 +1705,13 @@ fn defaults_resets_the_graphics_page_to_registered_defaults() {
         2,
         "only the default writes queue — never the dead pending: {changes:?}"
     );
-    // 357, not 350: the registered 350 is off the reference's 177 + n * 60 ladder
-    // (`OptionsFrame.lua:1-2`, `:26`), and `SetValue` snaps it on as 1.12's does; only our
-    // readout shows it.
+    // The extended slider's one-yard steps display the registered default exactly.
     assert_eq!(
         s.eval::<String>(
             "return BenillaOptionsFrameContainerBodyGraphicsRowFarclipControlValue:GetText()"
         )
         .unwrap(),
-        "357"
+        "350"
     );
     assert_eq!(
         s.eval::<String>(
@@ -2247,10 +2263,11 @@ fn every_row_tooltip_key_resolves_in_the_real_global_strings() {
             untipped.push(row.to_string());
             continue;
         }
-        // Four rows with no fitting 1.12 string carry a `BENILLA_` one, each held to its row:
+        // Rows with no fitting 1.12 string carry a `BENILLA_` one, each held to its row:
         // Render Scale and Enable Sound in Background have no 1.12 setting, Display Mode's
         // string describes a checkbox, and `OPTION_TOOLTIP_GAMMA` cites art this page lacks.
         const BENILLA_OWNED: &[(&str, &str)] = &[
+            ("BENILLA_TOOLTIP_DISTANCE_FOG", "GraphicsRowDistanceFog"),
             ("BENILLA_TOOLTIP_RENDER_SCALE", "GraphicsRowRenderScale"),
             ("BENILLA_TOOLTIP_DISPLAY_MODE", "GraphicsRowDisplayMode"),
             (
@@ -2281,9 +2298,9 @@ fn every_row_tooltip_key_resolves_in_the_real_global_strings() {
         );
         checked += 1;
     }
-    // 82 rows less the three untipped below; four of the 79 carry a `BENILLA_` key, and a dropdown
+    // 83 rows less the three untipped below; five of the 80 carry a `BENILLA_` key, and a dropdown
     // row is checked on the key it wears at rest.
-    assert_eq!(checked, 79, "every tipped row carries a live key");
+    assert_eq!(checked, 80, "every tipped row carries a live key");
     assert_eq!(
         untipped,
         vec![
@@ -2379,8 +2396,8 @@ fn every_flavor_of_row_raises_its_plate_from_the_page_it_lives_on() {
             s.errors()
         );
     }
-    // Every tipped row: the same 79 the key census counts.
-    assert_eq!(raised, 79, "every row but Auto Loot raises a description");
+    // Every tipped row: the same 80 the key census counts.
+    assert_eq!(raised, 80, "every row but Auto Loot raises a description");
 }
 
 /// 1.12's AdvancedOptionsCombatText box as saved-global rows: a click writes the global, never a

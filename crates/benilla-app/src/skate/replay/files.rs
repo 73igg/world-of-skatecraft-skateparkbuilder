@@ -521,7 +521,14 @@ pub(super) mod tests {
                     })
                 })
                 .collect(),
-            keys: Vec::new(),
+            keys: vec![Keyframe {
+                at: 0.,
+                pose: super::super::camera::pose(Transform::IDENTITY),
+                fov: 1.,
+                cut: false,
+                rate: 0.5,
+                interpolation: super::super::camera::Interpolation::Smooth,
+            }],
             cameras: Vec::new(),
             visuals: vec![Arc::new(Visual {
                 at: 0.,
@@ -550,6 +557,10 @@ pub(super) mod tests {
         std::fs::remove_file(&path).unwrap();
         assert_eq!(loaded.frames.len(), 3);
         assert_eq!(loaded.rate, 0.5);
+        assert_eq!(
+            loaded.keys[0].interpolation,
+            super::super::camera::Interpolation::Smooth
+        );
         assert_eq!(loaded.out_point, 0.2);
         assert!(Arc::ptr_eq(
             &loaded.frames[0].scene,

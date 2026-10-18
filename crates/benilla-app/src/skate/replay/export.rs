@@ -360,11 +360,11 @@ fn pump(
     mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     source: Query<
-        (&Transform, &Projection, Option<&RenderLayers>),
+        (&Transform, &Projection, Option<&RenderLayers>, &Msaa),
         With<benilla_world::view::WorldCamera>,
     >,
     mut cameras: Query<
-        (Entity, &mut Transform, &mut Projection),
+        (Entity, &mut Transform, &mut Projection, &mut Msaa),
         (
             With<ExportCamera>,
             Without<benilla_world::view::WorldCamera>,
@@ -372,7 +372,7 @@ fn pump(
     >,
 ) {
     if replay.exporting.is_none() {
-        for (entity, _, _) in &cameras {
+        for (entity, _, _, _) in &cameras {
             commands.entity(entity).despawn();
         }
         while captures.rx.try_recv().is_ok() {}
@@ -414,7 +414,8 @@ fn pump(
         return;
     }
     if session.target.is_none() {
-        let (Ok(window), Ok((transform, projection, layers))) = (windows.single(), source.single())
+        let (Ok(window), Ok((transform, projection, layers, msaa))) =
+            (windows.single(), source.single())
         else {
             return;
         };
@@ -436,6 +437,7 @@ fn pump(
         let entity = commands
             .spawn((
                 ExportCamera,
+                benilla_world::static_gx::StaticGxView,
                 Camera3d::default(),
                 Camera {
                     order: -2,
@@ -445,7 +447,7 @@ fn pump(
                 *transform,
                 projection.clone(),
                 layers.cloned().unwrap_or_default(),
-                bevy::render::view::Msaa::Off,
+                *msaa,
                 bevy::render::view::Hdr,
                 bevy::core_pipeline::tonemapping::Tonemapping::None,
                 benilla_world::ffx_glow::FfxGlow::WORLD,
@@ -455,10 +457,13 @@ fn pump(
         session.camera = Some(entity);
         return;
     }
-    if let (Ok((transform, projection, _)), Some(entity)) = (source.single(), session.camera) {
-        if let Ok((_, mut camera, mut target_projection)) = cameras.get_mut(entity) {
+    if let (Ok((transform, projection, _, msaa)), Some(entity)) = (source.single(), session.camera)
+    {
+        if let Ok((_, mut camera, mut target_projection, mut target_msaa)) = cameras.get_mut(entity)
+        {
             *camera = *transform;
             *target_projection = projection.clone();
+            target_msaa.set_if_neq(*msaa);
         }
     }
     while let Ok((id, result)) = captures.rx.try_recv() {
@@ -529,4 +534,85 @@ pub(super) fn plugin(app: &mut App) {
         PostUpdate,
         pump.before(bevy::transform::TransformSystems::Propagate),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use benilla_world::{static_gx::StaticGxView, view::WorldCamera};
+
+    #[test]
+    fn export_includes_static_world_and_mirrors_the_single_world_camera() {
+        let mut app = App::new();
+        app.init_resource::<Replay>()
+            .init_resource::<Captures>()
+            .init_resource::<crate::park::ReplaySceneReady>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(Update, pump);
+        app.world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow));
+        let source = app
+            .world_mut()
+            .spawn((
+                Camera3d::default(),
+                WorldCamera,
+                Msaa::Sample4,
+                bevy::render::view::Hdr,
+                Transform::from_xyz(10., 20., 30.),
+                Projection::Perspective(PerspectiveProjection {
+                    fov: 0.7,
+                    ..default()
+                }),
+            ))
+            .id();
+        let (tx, _) = crossbeam_channel::bounded(2);
+        let (_, rx) = crossbeam_channel::bounded(1);
+        app.world_mut().resource_mut::<Replay>().exporting = Some(Session {
+            id: 1,
+            tx,
+            rx,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            awaiting: false,
+            finishing: false,
+            frames: 0,
+            target: None,
+            camera: None,
+            pending: None,
+            progress: std::time::Instant::now(),
+            finish_sent: false,
+            dimensions: None,
+            process: Arc::new(Mutex::new(None)),
+        });
+        app.update();
+        let export = app
+            .world()
+            .resource::<Replay>()
+            .exporting
+            .as_ref()
+            .unwrap()
+            .camera
+            .unwrap();
+        assert!(app.world().get::<StaticGxView>(export).is_some());
+        assert!(app.world().get::<WorldCamera>(export).is_none());
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<WorldCamera>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(app.world().get::<Msaa>(export), Some(&Msaa::Sample4));
+        let position = Transform::from_xyz(40., 50., 60.);
+        app.world_mut()
+            .entity_mut(source)
+            .insert((position, Msaa::Sample2));
+        app.update();
+        assert_eq!(app.world().get::<Transform>(export), Some(&position));
+        assert_eq!(app.world().get::<Msaa>(export), Some(&Msaa::Sample2));
+        let Projection::Perspective(projection) = app.world().get::<Projection>(export).unwrap()
+        else {
+            panic!("export projection changed type");
+        };
+        assert_eq!(projection.fov, 0.7);
+    }
 }
