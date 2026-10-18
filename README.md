@@ -81,7 +81,19 @@ messages also show the effective Speed Demon multiplier and the push-speed limit
   choose recorded/free/follow/tripod cameras, and save camera keyframes or cuts. Save editable
   clips locally and export video with skating sounds using FFmpeg. Playback leaves your live
   server position parked; exiting returns you holding the board. Historical builder objects are
-  included. [Controls, storage and current scope](docs/skate-replay.md).
+  included, and expired history after a skateboard-mode break no longer blocks clip saving.
+  [Every replay hotkey, editor button, camera workflow and storage details](docs/skate-replay.md).
+- **Replay camera motion:** new camera keys use **Smooth continuous** movement through
+  intermediate keys. **Key motion** also offers **Linear** and **Ease in/out** for each outgoing
+  segment; cuts switch shots instantly. Existing saved clips retain their original easing.
+  Free camera travel speed is adjustable from **1–64 yards per second**, with **Direct / Smooth /
+  Soft** acceleration and braking and a **2x Shift or left-stick-click boost**. Movement preferences
+  persist locally. [How to compose and edit camera keys](docs/skate-replay.md#camera-modes-and-keys).
+- **Scenery visibility:** video exports include baked map objects such as fences, bridges and
+  buildings, with the world camera's anti-aliasing setting. Graphics options offer **Terrain
+  Distance up to 3,000 yards** and a persistent **Distance Fog** toggle. Higher distances use
+  more memory and can reduce frame rate; the default remains 350 yards with fog enabled.
+  [Distance and fog settings](docs/skate-replay.md#render-distance-and-fog).
 - **Natural character proportions:** animation retargeting preserves each playable race and
   sex's authored bone lengths and torso shape, including small Gnomes, large Tauren and hunched
   Undead. The pelvis and foot contacts adapt to the board, grabs use reach-limited arm placement,
