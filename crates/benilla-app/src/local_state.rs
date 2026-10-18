@@ -106,6 +106,11 @@ pub(crate) fn board_sizes_path() -> Option<PathBuf> {
     home().map(|h| h.join("skate/board-sizes.json"))
 }
 
+/// Private score-overlay and respawn-marker visibility; shared by this client's characters.
+pub(crate) fn skate_visibility_path() -> Option<PathBuf> {
+    home().map(|h| h.join("skate/visibility.json"))
+}
+
 /// `benilla-config/macros/account.txt`: the account-wide macro tab (indices 1..=18).
 pub(crate) fn macros_account_path() -> Option<PathBuf> {
     home().map(|h| h.join("macros/account.txt"))

@@ -44,6 +44,7 @@ class SourceAuditTests(unittest.TestCase):
 
     def test_source_and_target_selection_module_pass(self):
         self.stage("crates/benilla-app/src/target/example.rs", b"pub fn example() {}\n")
+        self.stage("rebuild.bat", b"@echo off\ncargo build --locked --release -p benilla --jobs 1\n")
         self.assertEqual(self.check(), 0)
 
     def test_game_archive_is_rejected_even_when_forced(self):

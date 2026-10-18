@@ -94,6 +94,12 @@ messages also show the effective Speed Demon multiplier and the push-speed limit
   Distance up to 3,000 yards** and a persistent **Distance Fog** toggle. Higher distances use
   more memory and can reduce frame rate; the default remains 350 yards with fog enabled.
   [Distance and fog settings](docs/skate-replay.md#render-distance-and-fog).
+- **Filming display controls:** every player can use **`/skatescore`** and **`/skateflag`** to
+  toggle the score overlay and personal respawn marker separately. **`/skatehud off`** hides
+  both; **`/skatehud on`** restores them. Each accepts `on`, `off`, `toggle` or `status`, with no
+  argument toggling. Preferences persist in `benilla-config/skate/visibility.json`; scoring,
+  XP, skill gains and flag returns keep working while the displays are hidden.
+  [Commands and configuration](docs/skate-replay.md#hide-score-and-respawn-flag-for-filming).
 - **Natural character proportions:** animation retargeting preserves each playable race and
   sex's authored bone lengths and torso shape, including small Gnomes, large Tauren and hunched
   Undead. The pelvis and foot contacts adapt to the board, grabs use reach-limited arm placement,
@@ -203,6 +209,23 @@ creates your game account and builds the game. Step-by-step details: [INSTALL.md
 If you already played the base mod, setup reuses its server and keeps your characters. To select
 it explicitly, use `setup.bat -Server "C:\original-skatecraft\server"` on Windows or
 `setup/setup.sh --server "/path/to/original-skatecraft/server"` on Linux.
+
+## Recompile client updates on Windows
+
+After initial setup, close the game, pull the latest source, and run **`rebuild.bat`**:
+
+```bat
+git pull
+rebuild.bat
+```
+
+It compiles the checked-out client into `target\release\benilla.exe`, reusing the existing Cargo
+build cache. It does not pull source, run setup, convert assets, change the server or databases,
+or launch the game. Start `play.bat` separately when the build succeeds. For a terminal or
+automation that should not pause at the end, use `rebuild.bat --no-pause`.
+
+Use `setup.bat` for first installation and updates that require server migration, native-engine
+preparation or asset conversion. [Update instructions](INSTALL.md#4-everyday-use).
 
 ## Play
 

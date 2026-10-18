@@ -83,8 +83,14 @@ responsive while other projects are running.
 
 - Play: `./play.sh` (starts the server if it isn't running).
 - Stop the server: `docker compose -p world-of-skatecraft -f server/compose.yaml down`.
-- Update: `git pull`, then run setup again (Windows: `setup.bat`; Linux: `setup/setup.sh`). It backs
-  up and migrates an existing database and verifies that the matching patched server runs.
+- Client-only update on Windows: close the game, run `git pull`, then double-click
+  **`rebuild.bat`**. It only runs the release client build, reuses the Cargo cache, and writes
+  `target\release\benilla.exe`. It does not start the game or run setup, server migration, or
+  asset conversion. Use `rebuild.bat --no-pause` from a terminal to skip the final key press.
+- Full update: `git pull`, then run setup again (Windows: `setup.bat`; Linux: `setup/setup.sh`).
+  Use this when the update requires server/database changes, native-engine preparation or new
+  asset conversion. Setup backs up and migrates an existing database and verifies that the
+  matching patched server runs.
 - New account or new password: `python3 tools/make_account.py <name> <password>`.
 
 ## 5. Windows (experimental)
@@ -114,6 +120,9 @@ setup issues (see the README).
    ```
 
 3. Start the game with `play.bat`.
+
+For subsequent client-only updates, pull the new source and use `rebuild.bat` instead of running
+setup again. The initial Rust/C++ tools and prepared Skate engine must already be installed.
 
 The folders are the same as on Linux, with `WoW` as a junction (a folder link) instead of a
 symlink. Stop the server with `docker compose -p world-of-skatecraft -f server\compose.yaml down`.

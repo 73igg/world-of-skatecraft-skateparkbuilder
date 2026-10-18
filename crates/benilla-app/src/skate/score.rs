@@ -172,6 +172,7 @@ pub(super) fn draw(
     windows: Query<&Window, With<PrimaryWindow>>,
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     mut score: ResMut<SkateScore>,
+    displays: Res<super::visibility::SkateVisibility>,
     mut root: Query<&mut Visibility, With<ScoreRoot>>,
     mut lines: Query<(&ScoreLine, &mut Text, &mut TextFont, &mut TextColor)>,
     mut font: Local<Option<Handle<Font>>>,
@@ -193,7 +194,10 @@ pub(super) fn draw(
     }
     score.skill = skill.or(score.skill);
 
-    let shown = shown(&score, now, skill);
+    let shown = displays
+        .show_score
+        .then(|| shown(&score, now, skill))
+        .flatten();
     let Ok(mut visibility) = root.single_mut() else {
         return;
     };
@@ -313,6 +317,58 @@ fn grouped(points: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hiding_the_overlay_preserves_scores_and_earned_xp() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Font>()
+            .init_resource::<SkateScore>()
+            .insert_resource(super::super::visibility::SkateVisibility {
+                show_score: false,
+                show_flag: true,
+            })
+            .add_systems(Startup, spawn)
+            .add_systems(Update, draw);
+        app.world_mut()
+            .resource_mut::<SkateScore>()
+            .observe(0., 2000., "Kickflip", None);
+        app.update();
+        let mut root = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<ScoreRoot>>();
+        assert_eq!(root.single(app.world()).unwrap(), &Visibility::Hidden);
+        let now = app.world().resource::<Time>().elapsed_secs();
+        let mut score = app.world_mut().resource_mut::<SkateScore>();
+        assert_eq!(score.observe(now, 0., "", Some(100.)), Some(2000.));
+        score.landed.as_mut().unwrap().xp = 80;
+        app.world_mut()
+            .resource_mut::<super::super::visibility::SkateVisibility>()
+            .show_score = true;
+        app.update();
+        assert_eq!(root.single(app.world()).unwrap(), &Visibility::Visible);
+        let mut lines = app.world_mut().query::<(&ScoreLine, &Text)>();
+        assert!(lines
+            .iter(app.world())
+            .any(|(line, text)| matches!(line, ScoreLine::Points) && text.0 == "+2,000"));
+        assert!(lines
+            .iter(app.world())
+            .any(|(line, text)| matches!(line, ScoreLine::Xp) && text.0 == "+80 XP"));
+        app.world_mut()
+            .resource_mut::<super::super::visibility::SkateVisibility>()
+            .show_score = false;
+        app.update();
+        assert_eq!(root.single(app.world()).unwrap(), &Visibility::Hidden);
+        assert_eq!(
+            app.world()
+                .resource::<SkateScore>()
+                .landed
+                .as_ref()
+                .unwrap()
+                .xp,
+            80
+        );
+    }
 
     #[test]
     fn trick_labels_drop_the_id_prefix() {

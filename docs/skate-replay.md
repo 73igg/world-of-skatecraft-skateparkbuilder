@@ -136,6 +136,36 @@ this does not load the entire continent. The defaults remain 350 yards with dist
 Exports include baked map geometry as well as terrain, interactable props and historical
 builder objects, using the world camera's anti-aliasing setting.
 
+## Hide score and respawn flag for filming
+
+These commands are available to every player; no GM or admin access is required:
+
+| Command | Effect |
+|---|---|
+| `/skatescore` | Toggle the trick, points, landing/bail, XP and skill display. |
+| `/skateflag` | Toggle your personal respawn flag marker. |
+| `/skatehud off` | Hide both displays. Use `/skatehud on` to show both again. |
+
+Each command also accepts `on`, `off`, `toggle` or `status`. Without an argument it toggles;
+`/skatehud` hides both if either is visible, or shows both if both are hidden. `status` reports
+the settings without changing them. Changes apply immediately and are saved locally for all
+characters using this client. They affect live play and replay viewing; the flag setting also
+applies to video exports. The score overlay is part of the screen UI, which exports omit.
+Hiding the score does not stop scoring, XP or skill gains. Hiding the flag does not move or
+delete your saved return point, or disable placement and return controls.
+
+You can also close the client and edit `benilla-config/skate/visibility.json` directly:
+
+```json
+{
+  "show_score": false,
+  "show_flag": false
+}
+```
+
+Both default to `true` if the file or a setting is absent. The commands create the file for
+you; edit this file rather than `config.toml`. Restart after editing it by hand.
+
 ## Saved clips and video
 
 Editable `.skate-replay` clips and exported MP4 files go in `benilla-config/Replays`, beneath

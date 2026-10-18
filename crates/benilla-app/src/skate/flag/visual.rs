@@ -8,6 +8,7 @@ struct LocalFlag;
 fn show(
     mut commands: Commands,
     state: Res<State>,
+    displays: Res<super::super::visibility::SkateVisibility>,
     drive: Res<super::super::SkateDrive>,
     map: Option<Res<CurrentMap>>,
     park: Res<crate::park::ParkWorld>,
@@ -16,7 +17,10 @@ fn show(
     mut markers: Query<(Entity, &mut Transform, &mut Visibility), With<LocalFlag>>,
 ) {
     let visible = state.saved.filter(|f| {
-        drive.active && map.as_ref().is_some_and(|m| m.0 == f.map) && f.instance == park.scope().1
+        displays.show_flag
+            && drive.active
+            && map.as_ref().is_some_and(|m| m.0 == f.map)
+            && f.instance == park.scope().1
     });
     if let Ok((_, mut transform, mut visibility)) = markers.single_mut() {
         *visibility = if visible.is_some() {
@@ -78,4 +82,59 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         show.in_set(benilla_world::schedule::WorldStage::Present),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::skate::{visibility::SkateVisibility, SkateDrive};
+
+    #[test]
+    fn hiding_the_marker_preserves_the_return_point_and_restores_the_same_entity() {
+        let flag = benilla_protocol::skate_flag::Flag {
+            revision: 1,
+            map: 0,
+            instance: 0,
+            zone: 12,
+            position: [1., 2., 3.],
+            facing: 0.5,
+        };
+        let mut app = App::new();
+        app.init_resource::<State>()
+            .insert_resource(SkateDrive {
+                active: true,
+                ..default()
+            })
+            .insert_resource(CurrentMap(0))
+            .init_resource::<crate::park::ParkWorld>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .insert_resource(SkateVisibility {
+                show_score: true,
+                show_flag: false,
+            })
+            .add_systems(Update, show);
+        app.world_mut().resource_mut::<State>().saved = Some(flag);
+        app.update();
+        let mut markers = app
+            .world_mut()
+            .query_filtered::<(Entity, &Visibility), With<LocalFlag>>();
+        assert_eq!(markers.iter(app.world()).count(), 0);
+        app.world_mut().resource_mut::<SkateVisibility>().show_flag = true;
+        app.update();
+        let entity = markers.single(app.world()).unwrap().0;
+        assert_eq!(markers.single(app.world()).unwrap().1, &Visibility::Visible);
+        app.world_mut().resource_mut::<SkateVisibility>().show_flag = false;
+        app.update();
+        assert_eq!(markers.single(app.world()).unwrap().1, &Visibility::Hidden);
+        assert_eq!(app.world().resource::<State>().saved, Some(flag));
+        assert!(app.world().resource::<State>().may_resume(Vec3::ZERO));
+        app.world_mut().resource_mut::<SkateVisibility>().show_flag = true;
+        app.update();
+        assert_eq!(markers.single(app.world()).unwrap().0, entity);
+        assert_eq!(markers.single(app.world()).unwrap().1, &Visibility::Visible);
+        app.world_mut().resource_mut::<SkateDrive>().active = false;
+        app.update();
+        assert_eq!(markers.single(app.world()).unwrap().1, &Visibility::Hidden);
+    }
 }

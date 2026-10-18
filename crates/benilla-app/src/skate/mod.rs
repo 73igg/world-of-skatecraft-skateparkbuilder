@@ -18,6 +18,7 @@ mod rig;
 pub(crate) use rig::Contact as RigContact;
 mod score;
 mod sound;
+mod visibility;
 mod work;
 
 use std::path::{Path, PathBuf};
@@ -1005,6 +1006,7 @@ pub(crate) struct SkateInputSet;
 
 pub(crate) fn plugin(app: &mut App) {
     board_size::plugin(app);
+    visibility::plugin(app);
     replay::plugin(app);
     flag::plugin(app);
     app.init_resource::<Host>()

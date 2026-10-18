@@ -10,6 +10,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+const SKATE_COMMANDS: [&str; 4] = ["boardsize", "skatescore", "skateflag", "skatehud"];
+
 /// A command benilla implements, named by its `SlashCmdList` index, the `SLASH_<INDEX><n>` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashIndex {
@@ -244,7 +246,9 @@ impl SlashCommands {
         }
         let dev_aliases = by_alias.len() - before_dev;
 
-        insert(&mut by_alias, "boardsize", Command::Console("boardsize"));
+        for name in SKATE_COMMANDS {
+            insert(&mut by_alias, name, Command::Console(name));
+        }
 
         Self {
             by_alias,
@@ -286,8 +290,11 @@ pub(crate) fn register_dev_commands(script: &benilla_ui::script::UiScript, dev: 
 
 /// Fork commands are player affordances, available after every in-game UI load or reload.
 pub(crate) fn register_skate_commands(script: &benilla_ui::script::UiScript) {
-    if let Err(e) = script.register_host_slash_command("BENILLA_BOARDSIZE", &["/boardsize"]) {
-        warn!("chat: registering /boardsize: {e}");
+    for name in SKATE_COMMANDS {
+        let key = format!("BENILLA_{}", name.to_ascii_uppercase());
+        if let Err(e) = script.register_host_slash_command(&key, &[&format!("/{name}")]) {
+            warn!("chat: registering /{name}: {e}");
+        }
     }
 }
 
@@ -317,4 +324,26 @@ pub(crate) fn build_slash_commands(
         error!("chat: NO emote aliases — every /wave-style command is dead (GlobalStrings?)");
     }
     commands.insert_resource(table);
+}
+
+#[cfg(test)]
+mod skate_command_tests {
+    use super::*;
+
+    #[test]
+    fn filming_commands_register_and_route_after_each_ui_load() {
+        let table = SlashCommands::build(|_| None, |_| None);
+        for _ in 0..2 {
+            let mut script = benilla_ui::script::UiScript::new().unwrap();
+            script.run("SlashCmdList = {}").unwrap();
+            register_skate_commands(&script);
+            for name in ["skatescore", "skateflag", "skatehud"] {
+                assert_eq!(table.lookup(name), Some(Command::Console(name)));
+                assert!(script.run_slash_command(&name.to_ascii_uppercase(), "off"));
+                assert_eq!(script.take_chat_input(), [format!("/{name} off")]);
+                assert!(script.take_chat_sends().is_empty(), "visibility is local");
+            }
+            assert!(script.errors().is_empty());
+        }
+    }
 }

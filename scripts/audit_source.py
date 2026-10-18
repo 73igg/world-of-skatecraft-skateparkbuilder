@@ -20,7 +20,7 @@ SOURCE_ROOTS = {".cargo", ".github", ".githooks", "crates", "docs", "reference",
 ROOT_FILES = {
     ".gitattributes", ".gitignore", "AGENTS.md", "CONTRIBUTING.md", "Cargo.lock",
     "Cargo.toml", "INSTALL.md", "LICENSE-APACHE", "LICENSE-MIT", "NOTICE", "README.md",
-    "TROUBLESHOOTING.md", "play.bat", "play.ps1", "play.sh", "rust-toolchain.toml", "setup.bat", "shell.nix",
+    "TROUBLESHOOTING.md", "play.bat", "play.ps1", "play.sh", "rebuild.bat", "rust-toolchain.toml", "setup.bat", "shell.nix",
 }
 APPROVED_MEDIA: dict[str, str] = {
     'docs/media/skatebuilder.mp4': '489925d95471fa66ac8ff13db8c91d7f51055b4f76b6ce5ffc9ce6ba210e8dba',
