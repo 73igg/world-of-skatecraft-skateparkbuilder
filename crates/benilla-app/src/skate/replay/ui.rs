@@ -116,12 +116,13 @@ fn startup(mut commands: Commands, assets: Res<AssetServer>) {
             p.spawn(Node {flex_wrap:FlexWrap::Wrap,column_gap:px(7),row_gap:px(5),..default()}).with_children(|row|{
                 for (a,l) in [(Action::Step(-1),"◀ Frame"),(Action::Play,"Play / Pause"),(Action::Step(1),"Frame ▶"),
                     (Action::In,"Set start"),(Action::Out,"Set end"),(Action::ResetTrim,"Reset trim"),(Action::Window(-15.),"Window −15s"),(Action::Window(15.),"Window +15s"),(Action::Rate(-0.25),"Slower"),(Action::Rate(0.25),"Faster"),
-                    (Action::Camera,"Camera"),(Action::CameraPath,"Toggle camera keys"),(Action::Fov(-0.1),"Zoom in"),(Action::Fov(0.1),"Zoom out")]
+                    (Action::Camera,"Camera"),(Action::CameraPath,"Toggle camera keys"),(Action::Fov(-0.1),"Zoom in"),(Action::Fov(0.1),"Zoom out"),
+                    (Action::FlySpeed(0.8),"Move slower"),(Action::FlySpeed(1.25),"Move faster"),(Action::FlyResponse,"Move response")]
                 {button(row,a,l,&font);}
             });
             p.spawn(Node {flex_wrap:FlexWrap::Wrap,column_gap:px(7),row_gap:px(5),..default()}).with_children(|row|{
                 for (a,l) in [(Action::Keyframe(false),"Set camera key"),(Action::Keyframe(true),"Set camera cut"),
-                    (Action::SelectKey(-1),"Previous key"),(Action::SelectKey(1),"Next key"),(Action::DeleteKeyframe,"Remove key"),(Action::KeyRate(-0.25),"Key slower"),(Action::KeyRate(0.25),"Key faster"),(Action::Save,"Save clip"),(Action::Library,"Saved clips"),
+                    (Action::SelectKey(-1),"Previous key"),(Action::SelectKey(1),"Next key"),(Action::DeleteKeyframe,"Remove key"),(Action::KeyInterpolation,"Key motion"),(Action::KeyRate(-0.25),"Key slower"),(Action::KeyRate(0.25),"Key faster"),(Action::Save,"Save clip"),(Action::Library,"Saved clips"),
                     (Action::Export,"Export video"),(Action::Toggle,"Exit replay")]
                 {button(row,a,l,&font);}
             });
@@ -262,10 +263,16 @@ fn draw(
     }
     if let Ok(mut text) = status.single_mut() {
         let (start, end) = replay.bounds();
+        let motion = replay
+            .keys
+            .iter()
+            .find(|k| (k.at - replay.cursor).abs() < 0.05)
+            .map_or("Select a key", |k| k.interpolation.label());
         **text=format!(
-        "REPLAY  {:.2} / {:.2}s  ·  {}  ·  {:.2}×  ·  {} camera  ·  {} keys  ·  clip {:.2}–{:.2}s\nRecording window: {:.0}s (15–90s)  ·  Selected clip: {:.2}s\n{}",
+        "REPLAY  {:.2} / {:.2}s  ·  {}  ·  {:.2}×  ·  {} camera  ·  {} keys  ·  clip {:.2}–{:.2}s\nRecording window: {:.0}s (15–90s)  ·  Selected clip: {:.2}s\nFree move: {:.1} yd/s (Shift: 2x) | {} response | Outgoing key motion: {}\n{}",
         replay.cursor-start,end-start,if replay.playing{"Playing"}else{"Paused"},replay.rate,replay.mode.label(),
-        replay.keys.len(),replay.in_point-start,replay.out_point-start,replay.window,replay.out_point-replay.in_point,replay.status);
+        replay.keys.len(),replay.in_point-start,replay.out_point-start,replay.window,replay.out_point-replay.in_point,
+        replay.fly.speed, replay.fly.response.label(), motion, replay.status);
     }
     let wanted: Vec<_> = replay.keys.iter().map(|k| (k.at, k.cut)).collect();
     if *old_marks != wanted {

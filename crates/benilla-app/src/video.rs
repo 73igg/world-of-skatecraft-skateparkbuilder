@@ -209,6 +209,7 @@ pub(crate) fn on_cvar(
             info!("video: full-screen effects {:?}", *ffx);
         }
         "farclip" => view.farclip = v.clamp(*FARCLIP_RANGE.start(), *FARCLIP_RANGE.end()),
+        "distancefog" => view.distance_fog = ev.flag(),
         // Clamped, where the reference refuses an out-of-range write and keeps the value
         // (`0x688d90` echoes "NearClip must be in range 0.01 - 0.33" and returns 0).
         "nearclip" => view.set_nearclip(v),

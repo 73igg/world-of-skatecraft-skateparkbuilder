@@ -7,6 +7,8 @@ current replay and pause at its start. Increasing the window can use footage sti
 frozen clip, but cannot recover footage already discarded while skating.
 Recording happens before the replaceable display queue, so a missed render does not drop a
 simulation pose. A 192 MiB memory budget can shorten this window in unusually large recordings.
+Resuming after a skateboard-mode break discards expired history, so the gap cannot extend the
+rolling recording beyond its limit and prevent an editable clip from saving.
 Same-map flag returns retain the preceding run and create a cut at the return. Changing maps,
 instances or appearance starts a new rolling recording. Opening replay freezes that recording
 and parks the live character. The server, other players,
@@ -16,32 +18,123 @@ the skateboard, after held controls have been released.
 
 ## Controls
 
+Open the editor while in Skate mode after recording some footage. Controller names below use
+PlayStation / Xbox labels. Keyboard shortcuts apply while the replay editor is open, except
+F6, which also opens it. Actions without a shortcut are listed in the editor-buttons table.
+
 | Action | Keyboard / mouse | Controller |
 |---|---|---|
-| Open / close | F6 or Skate Replay ability; Escape closes | Both stick clicks; Circle / B closes |
-| Recording window | Window −15s / Window +15s in the editor | Use the editor buttons |
-| Play / pause | Space or Play button | Cross / A |
-| Scrub | Drag timeline; Left / Right | L2 / R2 |
-| Previous / next native frame | Comma / Period | D-pad Left / Right |
-| Camera mode | C or Camera button | Triangle / Y |
-| Move free camera | WASD, Q / E; Shift goes faster | Left stick, L1 / R1; left stick click goes faster |
+| Open / close replay | F6; Skate Replay ability also toggles it | Click both sticks together (L3 + R3) |
+| Close replay | Escape | Circle / B |
+| Cancel an active export and return to skating | Escape or F6 | Circle / B or both stick clicks |
+| Play / pause | Space | Cross / A |
+| Scrub backward / forward and pause | Hold Left / Right arrow, or drag the timeline | Hold L2 / R2 (LT / RT) |
+| Previous / next recorded simulation frame | Comma / Period | D-pad Left / Right |
+| Set trim start / end at the current time | Left bracket `[` / right bracket `]` | Use Set start / Set end buttons |
+| Jump to trim start / end and pause | Home / End | Use the timeline |
+| Cycle camera mode | C | Triangle / Y |
+| Move free camera forward / backward / left / right | W / S / A / D | Left stick |
+| Move free camera down / up | Q / E | L1 / R1 (LB / RB) |
+| Double free camera movement speed while held | Either Shift key | Hold left stick click (L3) |
 | Aim free camera | Hold right mouse and move | Right stick |
-| Zoom | Zoom buttons | Use the editor buttons |
-| Trim start / end | [ / ]; Reset trim restores the full recording | Use the editor buttons |
-| Jump to start / end | Home / End | Use the timeline |
-| Save camera key / cut | T / Shift-T | Square / X saves a key |
-| Previous / next camera key | Page Up / Page Down | Use the editor buttons |
-| Remove selected key | Delete | Use the editor button |
-| Save / saved clips / export | Ctrl-S / Ctrl-O / Ctrl-E | Use the editor buttons |
+| Save or replace a camera key at the current time | T | Square / X |
+| Save or replace a camera cut at the current time | **Left Shift + T** | Use Set camera cut button |
+| Select previous / next camera key and pause | Page Up / Page Down | Use Previous key / Next key buttons |
+| Remove the selected camera key or cut | Delete | Use Remove key button |
+| Save an editable clip | Ctrl + S | Use Save clip button |
+| Open / close the saved-clip library | Ctrl + O | Use Saved clips button |
+| Export the trimmed clip as video | Ctrl + E | Use Export video button |
 
-Select / Back / Create remains reserved for the personal flag. Free camera is an editor fly
-camera; move it to the shot you want, then save a key. Yellow timeline markers are camera keys,
-red markers are cuts. Seeking previews the camera path; while paused, free camera remains
-editable. Camera mode changes let you compare the original and the other camera modes; Toggle camera
-keys restores your edited path. Playing or exporting interpolates between enabled keys, including their FOV and playback
-speed. Slower / Faster scales the entire clip; Key slower / Key faster adjusts only the key
-you have selected with Previous / Next key. A cut holds the preceding shot until the cut time. Recorded camera mode uses the final
-camera actually shown during skating, including collision and smoothing.
+Either Ctrl key works for save, library and export shortcuts. Holding Ctrl suppresses WASD
+and Q/E camera movement so these shortcuts do not move the shot. The cut shortcut specifically
+uses **Left Shift**; Right Shift still works for the free camera speed boost. During export,
+editing and playback controls are disabled; the cancel controls above remain available.
+
+Select / Back / Create remains reserved for the personal flag. Many actions above also have
+clickable editor buttons. These additional controls have no dedicated keyboard or pad shortcut:
+
+| Editor button | What it does |
+|---|---|
+| Window −15s / Window +15s | Choose a 15–90 second recording window in 15-second steps; select that recent portion of the current recording and pause at its start. |
+| Reset trim | Restore the full available recording as the trim range. |
+| Slower / Faster | Adjust overall clip playback speed, scaling existing key speeds too, within 0.1x–4x. |
+| Toggle camera keys | Enable or disable the edited camera path without deleting keys. |
+| Zoom in / Zoom out | Adjust the current camera's field of view; save a key to include it in the path. |
+| Move slower / Move faster | Adjust free camera travel speed from 1 to 64 yards per second. |
+| Move response | Cycle Direct, Smooth and Soft free camera acceleration and braking. |
+| Key motion | Cycle the selected key's outgoing segment through Smooth continuous, Linear and Ease in/out. |
+| Key slower / Key faster | Adjust playback speed at the selected key in 0.25x steps, within 0.1x–4x. |
+
+In Saved clips, click a clip to load it. Use Previous key / Next key (Page Up / Page Down)
+before changing Key motion, Key slower / Key faster, or removing a key. The status line shows
+the selected key's motion and the current free camera speed and response.
+
+## Camera modes and keys
+
+C cycles **Recorded → Free → Follow → Tripod → Recorded**:
+
+- **Recorded:** the camera actually shown during skating, including collision and smoothing.
+- **Free:** move and aim the camera yourself to compose shots.
+- **Follow:** move with the skater at a fixed offset and aim at them.
+- **Tripod:** keep the camera position fixed and turn to aim at the skater.
+
+Changing camera mode disables the edited path for comparison. **Toggle camera keys** restores
+it; selecting or saving a key also enables it. When enabled, the path controls the camera
+during seeking, playback and export. While paused in Free mode, you can reposition the camera
+before saving or replacing a key.
+
+To create a camera path:
+
+1. Pause and scrub to the start of the shot, then switch to Free camera with C.
+2. Move, aim and zoom to frame the skater, then press T to save the first key.
+3. Scrub forward, compose the next shot and press T again. Repeat where framing should change.
+4. Use Home and Space to preview from the trim start. Adjust keys with Page Up / Page Down,
+   reposition the camera, then press T to replace the selected key.
+5. Save the editable clip with Ctrl + S; use Ctrl + E to export the trimmed video.
+
+Yellow timeline markers are camera keys; red markers are cuts. Each key stores camera position,
+orientation, zoom and playback speed at that replay time. Keyed shots use the aim you save;
+they do not automatically track the skater. Covering the same camera distance in less replay
+time makes the camera move faster.
+
+**Key motion applies from the selected key to the following key.** New keys use Smooth
+continuous; select a key and click Key motion to cycle the options:
+
+| Key motion | Result |
+|---|---|
+| Smooth continuous | Position, rotation and zoom flow through intermediate keys, with a stop at each end of the shot. Use it on consecutive keys for continuous movement. |
+| Linear | Move directly between keys at a steady rate within each segment; direction or speed can change abruptly at a key. |
+| Ease in/out | Accelerate away from each key and slow to a stop at the next. |
+
+A cut holds the preceding key's shot until the cut time, then switches instantly to the cut's
+shot. Smoothing restarts at the cut. Press Left Shift + T or Set camera cut to create one.
+Existing saved clips retain their original Ease in/out motion until you change their keys.
+Smooth paths can curve outside the straight line between keys; preview shots near obstacles.
+Playback speed blends between key speeds independently of the selected camera-motion type.
+
+## Free camera movement settings
+
+Move slower / Move faster adjusts travel speed from 1 to 64 yards per second, starting at
+8 yards per second. Either Shift key or left stick click doubles the selected speed while
+held. Move response cycles:
+
+- **Direct:** immediate movement and stopping.
+- **Smooth:** a short acceleration and braking response; the default.
+- **Soft:** a longer acceleration and braking response.
+
+These controls affect positioning the free camera. Key motion controls the saved path, and
+Slower / Faster or Key slower / Key faster controls clip playback speed. Free camera speed
+and response are remembered between launches.
+
+## Render distance and fog
+
+Graphics options allow Terrain Distance from 177 to 3,000 yards, including while editing and
+exporting replays. Turn Distance Fog off for a clear view to that range; the sky and coarse
+horizon silhouettes retain their colours. Both settings are remembered locally. Longer
+distances load more map tiles and objects, increasing memory use and reducing frame rate;
+this does not load the entire continent. The defaults remain 350 yards with distance fog on.
+Exports include baked map geometry as well as terrain, interactable props and historical
+builder objects, using the world camera's anti-aliasing setting.
 
 ## Saved clips and video
 
@@ -50,7 +143,7 @@ this checkout's central local-state folder. This directory is ignored by Git. Cl
 motion, final character joint poses, camera tracks, and historical builder definitions. They
 contain no model meshes, textures, extracted sounds, accounts, credentials or install paths.
 All referenced models and sounds are loaded from the user's own game conversions.
-The recording-window preference is stored separately in `benilla-config/Replays/settings.json`.
+Recording-window and free-camera preferences are stored in `benilla-config/Replays/settings.json`.
 Skate Replay is learned at character creation and on login, appears in the General spellbook,
 and can be placed on an action bar. The ability opens the same editor as F6.
 

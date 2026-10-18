@@ -22,6 +22,7 @@ mod cull;
 mod pick;
 mod pool;
 mod render;
+pub use render::StaticGxView;
 
 /// The doodad spatial cell, a quarter ADT tile (133⅓ yd), as `terrain_stream::merge::CELL`.
 const CELL: f32 = 533.333_3 / 4.0;

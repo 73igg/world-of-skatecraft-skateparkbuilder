@@ -83,6 +83,8 @@ fn is_instrument_consumer(rel: &str) -> bool {
 /// orders its retarget after the global sequences and picks rolling sounds by surface). Adding a
 /// row is a claim made in review, with its record.
 const PUBLISHED: &[(&str, &str)] = &[
+    // Replay exports mirror the world view and must opt into its retained map-geometry pass.
+    ("static_gx::StaticGxView", "skate"),
     ("bgwin::BgWinPlugin", "wall"),
     ("bgwin::background_run", "record"),
     ("bgwin::no_pixel_run", "record"),

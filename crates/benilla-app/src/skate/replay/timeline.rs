@@ -119,10 +119,12 @@ impl History {
         self.bytes = 0;
     }
     fn prune(&mut self, at: f64) {
-        while self.frames.len() > 2
+        while self.frames.len() > 1
             && (self.frames.len() > MAX_FRAMES
                 || self.frames[1].at < at - self.window
-                || self.bytes > MEMORY_LIMIT)
+                // A cut cannot interpolate with its predecessor, even across a long skate break.
+                || (self.frames[0].at < at - self.window && self.frames[1].cut)
+                || (self.frames.len() > 2 && self.bytes > MEMORY_LIMIT))
         {
             let old = self.frames.pop_front().unwrap();
             self.bytes -= frame_bytes(&old);
@@ -343,6 +345,7 @@ impl Recording {
             fov,
             rate: 1.,
             cut,
+            interpolation: super::camera::Interpolation::Linear,
         };
         if history.cameras.back().is_some_and(|c| c.at == at) {
             history.cameras.pop_back();
@@ -455,6 +458,58 @@ mod tests {
         assert!(frames.last().unwrap().at - frames.first().unwrap().at <= WINDOW + 0.011);
         assert!(frames.len() > 8900);
         assert!(frames.windows(2).all(|w| w[0].at < w[1].at));
+    }
+    #[test]
+    fn skate_breaks_evict_expired_cut_brackets_and_still_save() {
+        for gap in [1., 70., 110., 3600.] {
+            let recording = Recording::default();
+            recording.activate(1, Vec3::ZERO, (0, 0));
+            for tick in 0..1001 {
+                capture_at(&recording, tick as f64 * 0.01, tick);
+                recording.visual(tick, Transform::IDENTITY, &[Transform::IDENTITY]);
+                recording.camera(tick, Transform::IDENTITY, 1.);
+            }
+            recording.invalidate(2);
+            recording.activate(3, Vec3::ZERO, (0, 0));
+            for tick in 0..10001 {
+                let mut frame = super::super::files::tests::frame(1001 + tick);
+                frame.published_at = recording.0.lock().unwrap().start
+                    + std::time::Duration::from_secs_f64(10.01 + gap + tick as f64 * 0.01);
+                recording.capture(3, &frame);
+                recording.visual(frame.tick, Transform::IDENTITY, &[Transform::IDENTITY]);
+                recording.camera(frame.tick, Transform::IDENTITY, 1.);
+                let history = recording.0.lock().unwrap();
+                assert!(
+                    history.frames.back().unwrap().at - history.frames.front().unwrap().at
+                        <= WINDOW + 0.011
+                );
+                drop(history);
+                if tick == 1 || tick == 1000 || tick == 10000 {
+                    let (frames, cameras, visuals) = recording.freeze();
+                    let first = frames.first().unwrap().at;
+                    let last = frames.last().unwrap().at;
+                    let clip = super::super::files::Clip {
+                        frames,
+                        cameras,
+                        visuals,
+                        keys: Vec::new(),
+                        in_point: first,
+                        out_point: last,
+                        rate: 1.,
+                        camera_settings: default(),
+                    };
+                    let path = std::env::temp_dir().join(format!(
+                        "benilla-replay-gap-{}-{gap}-{tick}.skate-replay",
+                        std::process::id()
+                    ));
+                    super::super::files::save(&path, &clip).unwrap();
+                    let loaded = super::super::files::load(&path).unwrap();
+                    std::fs::remove_file(path).unwrap();
+                    assert_eq!(loaded.frames.len(), clip.frames.len());
+                    recording.resume();
+                }
+            }
+        }
     }
     #[test]
     fn window_changes_keep_frozen_edits_and_bound_subsequent_recording() {

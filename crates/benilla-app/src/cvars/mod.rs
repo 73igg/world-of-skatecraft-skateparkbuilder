@@ -1000,6 +1000,10 @@ mod tests {
         assert_eq!(d["uiScale"], DEFAULT_UI_SCALE);
         // `ViewDistance::default()` reads `$WOW_FARCLIP`, so this is the env-less literal.
         assert_eq!(d["farclip"], 350.0);
+        assert_eq!(
+            d["distanceFog"] != 0.0,
+            ViewDistance::default().distance_fog
+        );
         assert_eq!(d["nearclip"], benilla_world::view::NEARCLIP_DEFAULT);
         assert_eq!(
             d["nearclip"],
@@ -1195,6 +1199,14 @@ mod tests {
         assert_eq!(res::<SoundConfig>(&app).master, 1.0);
         apply(&mut app, "farclip", "50");
         assert_eq!(res::<ViewDistance>(&app).farclip, *FARCLIP_RANGE.start());
+        apply(&mut app, "farclip", "3000");
+        assert_eq!(res::<ViewDistance>(&app).farclip, 3000.0);
+        apply(&mut app, "farclip", "9000");
+        assert_eq!(res::<ViewDistance>(&app).farclip, *FARCLIP_RANGE.end());
+        apply(&mut app, "distanceFog", "0");
+        assert!(!res::<ViewDistance>(&app).distance_fog);
+        apply(&mut app, "distanceFog", "1");
+        assert!(res::<ViewDistance>(&app).distance_fog);
         // `nearclip` clamps to the callback's `[0.01, 0.33]` (`0x688d90`).
         apply(&mut app, "nearclip", "0.001");
         assert_eq!(
@@ -1536,9 +1548,11 @@ mod tests {
             .into(),
         );
         cvars.set("MusicVolume", "0.7"); // moved: written
+        cvars.set("distanceFog", "0");
         cvars.set("farclip", "350"); // back to default: removed
         let out = cvars.compose();
         assert_eq!(out.get("MusicVolume").map(String::as_str), Some("0.7"));
+        assert_eq!(out.get("distanceFog").map(String::as_str), Some("0"));
         assert!(!out.contains_key("MasterVolume"), "at default: absent");
         assert_eq!(out.get("uiScale").map(String::as_str), Some("0.8"));
         assert!(!out.contains_key("farclip"));
@@ -1645,6 +1659,7 @@ mod tests {
             .insert_resource(UiScaleCvar(DEFAULT_UI_SCALE))
             .insert_resource(ViewDistance {
                 farclip: 350.0,
+                distance_fog: true,
                 nearclip: benilla_world::view::NEARCLIP_DEFAULT,
             })
             .insert_resource(MsaaSetting { samples: 1 })

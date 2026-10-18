@@ -25,6 +25,11 @@ use benilla_formats::WdlFile;
 /// (2112 yd, about 4 tiles) still rise above the horizon as silhouettes.
 const WDL_RADIUS: u32 = 5;
 
+/// Extended filming distances leave a coarse horizon beyond the enlarged detailed world too.
+fn wdl_radius(farclip: f32) -> u32 {
+    WDL_RADIUS.max(((farclip + 528.0) / benilla_formats::TILE_SIZE).ceil() as u32 + 1)
+}
+
 /// New WDL tiles built per frame (545 vertices each), so a whole ring does not hitch a zone load.
 const WDL_LOADS_PER_FRAME: usize = 8;
 
@@ -121,6 +126,7 @@ fn stream_wdl(
     streamer: Option<ResMut<WdlStreamer>>,
     assets: Option<ResMut<WorldAssets>>,
     focus: Res<crate::terrain_stream::ViewFocus>,
+    view: Res<crate::view::ViewDistance>,
     camera: Query<&Transform, With<WorldCamera>>,
     current_map: Option<Res<CurrentMap>>,
     map_catalog: Option<Res<MapCatalogRes>>,
@@ -163,7 +169,9 @@ fn stream_wdl(
     let center = focus.resolve(camera.single().ok().map(|c| c.translation));
     // The full window, the camera's own tile included (at a low view distance it is the near
     // horizon); the shader's near plane bounds the band, never the streamed set.
-    let desired = streamer.wdl.tiles_in_ring(center[0], center[1], WDL_RADIUS);
+    let desired = streamer
+        .wdl
+        .tiles_in_ring(center[0], center[1], wdl_radius(view.farclip));
 
     let stale: Vec<(u32, u32)> = streamer
         .loaded
@@ -241,6 +249,13 @@ fn the_far_band_stays_a_depth_pushed_backdrop() {
         "wdl.wgsl: the far band no longer clamps its depth behind the far-clip wall — its overlap \
          now pokes THROUGH the detailed terrain (the reference's compressed far-band depth range)"
     );
+}
+
+#[test]
+fn extended_view_keeps_a_horizon_beyond_the_detailed_world() {
+    assert_eq!(wdl_radius(350.0), WDL_RADIUS);
+    assert_eq!(wdl_radius(777.0), WDL_RADIUS);
+    assert!(wdl_radius(3000.0) as f32 * benilla_formats::TILE_SIZE > 3528.0);
 }
 
 /// The reference's far-band emitter submits its own fog pair, start 0 and end 1.0 (`0x6bd7ae` to

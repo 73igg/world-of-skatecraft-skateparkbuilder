@@ -69,14 +69,16 @@ impl Viewer {
 #[derive(Resource, Clone, Copy)]
 pub struct ViewDistance {
     pub farclip: f32,
+    /// Whether distance haze covers the detailed world. The coarse horizon stays a silhouette.
+    pub distance_fog: bool,
     /// The camera near plane in yards, the `nearclip` CVar ([`stamp_near_clip`]).
     pub nearclip: f32,
 }
 
-/// The settable range of [`ViewDistance::farclip`]: the reference's `farclip` clamp,
-/// `[0x81021c]` = 177 to `[0x80fed8]` = 777 in its validate callback `0x688d40`; shared by the
-/// CVar apply, the options row and `$WOW_FARCLIP`.
-pub const FARCLIP_RANGE: std::ops::RangeInclusive<f32> = 177.0..=777.0;
+/// The settable range of [`ViewDistance::farclip`], shared by the CVar and `$WOW_FARCLIP`.
+/// Deviation: extend the reference's 177..777 clamp (`0x688d40`) to 3000 yards for skate filming.
+/// The default stays 350; the streamer, projection and art-cache floor follow the larger range.
+pub const FARCLIP_RANGE: std::ops::RangeInclusive<f32> = 177.0..=3000.0;
 
 /// The settable range of [`ViewDistance::nearclip`]: the bounds in the reference's `nearclip`
 /// change callback `0x688d90`, `[0x8029d0]` = 0.01 and `[0x808300]` = 0.33.
@@ -239,13 +241,29 @@ impl Plugin for MsaaSupportPlugin {
     }
 }
 
-/// The world camera's projection far plane in yards. Deviation: the reference projects the
+/// The world camera's minimum projection far plane in yards. Deviation: the reference projects the
 /// detailed world to `farclip` and the horizon to `horizonfarclip` (default 2112, floored at
 /// `farclip + 528`); ours has one far plane well beyond `farclip`, because the WDL ring draws in
 /// the same projection, and the detailed world ends at `farclip` by the wall.
 pub const CAM_FAR: f32 = 3000.0;
 
 impl ViewDistance {
+    /// Leave a horizon band beyond the detailed world, including at extended view distances.
+    fn projection_far(&self) -> f32 {
+        CAM_FAR.max(self.farclip + 528.0)
+    }
+
+    /// Distance fog off leaves the horizon's own colour intact. Every detailed-world shader
+    /// discards beyond `farclip`, so moving the fog's start there removes haze without exposing
+    /// the untextured, white WDL hull that the debug fog switch deliberately shows.
+    pub(crate) fn fog_span(&self, start: f32, end: f32) -> (f32, f32) {
+        if self.distance_fog {
+            (start, end)
+        } else {
+            (self.farclip, self.farclip + 1.0)
+        }
+    }
+
     /// Set the near plane from a `nearclip` write, clamped to [`NEARCLIP_RANGE`].
     pub fn set_nearclip(&mut self, v: f32) {
         self.nearclip = v.clamp(*NEARCLIP_RANGE.start(), *NEARCLIP_RANGE.end());
@@ -264,6 +282,7 @@ impl Default for ViewDistance {
             });
         Self {
             farclip,
+            distance_fog: true,
             nearclip: NEARCLIP_DEFAULT,
         }
     }
@@ -272,7 +291,7 @@ impl Default for ViewDistance {
 /// Whether a world bounding sphere is inside the far-clip wall, the one CPU-side test of it: planar
 /// depth along camera-forward to the sphere's nearest point, the coordinate the shaders' per-pixel
 /// wall discards on (eye-Z past `fog_params.w`), so a straddling object dissolves instead of
-/// popping. The frustum's far plane is [`CAM_FAR`], so it is no substitute: this test and the
+/// popping. The frustum's far plane is at least [`CAM_FAR`], so it is no substitute: this test and the
 /// shaders' discard are the whole `farclip` bound.
 pub fn within_farclip(
     farclip: f32,
@@ -316,7 +335,7 @@ pub fn msaa_from_env() -> bevy::render::view::Msaa {
 pub const NEARCLIP_DEFAULT: f32 = 0.1;
 
 /// The reference's `0x511bc0` near stamp: the live `nearclip` onto the world camera's projection
-/// every frame. The far plane is not stamped: ours is [`CAM_FAR`].
+/// every frame. Deviation: extend the far plane past [`CAM_FAR`] for skate filming distances.
 pub fn stamp_near_clip(
     view: Res<ViewDistance>,
     mut cam: Query<&mut Projection, With<WorldCamera>>,
@@ -326,11 +345,12 @@ pub fn stamp_near_clip(
         let Projection::Perspective(current) = proj.as_ref() else {
             continue;
         };
-        if current.near == view.nearclip {
+        if current.near == view.nearclip && current.far == view.projection_far() {
             continue;
         }
         if let Projection::Perspective(p) = &mut *proj {
             p.near = view.nearclip;
+            p.far = view.projection_far();
         }
     }
 }
@@ -386,6 +406,51 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
 
+    #[test]
+    fn extended_distance_updates_the_live_projection_and_can_shrink_again() {
+        let mut app = App::new();
+        app.insert_resource(ViewDistance {
+            farclip: *FARCLIP_RANGE.end(),
+            distance_fog: false,
+            nearclip: NEARCLIP_DEFAULT,
+        });
+        app.add_systems(Update, stamp_near_clip);
+        let camera = app
+            .world_mut()
+            .spawn((WorldCamera, Projection::default()))
+            .id();
+        app.update();
+        let Projection::Perspective(p) = app.world().get::<Projection>(camera).unwrap() else {
+            panic!("perspective camera");
+        };
+        assert_eq!(p.far, 3528.0);
+        app.world_mut().resource_mut::<ViewDistance>().farclip = 350.0;
+        app.update();
+        let Projection::Perspective(p) = app.world().get::<Projection>(camera).unwrap() else {
+            panic!("perspective camera");
+        };
+        assert_eq!(p.far, CAM_FAR);
+    }
+
+    #[test]
+    fn distance_fog_off_clears_the_entire_detailed_range() {
+        let mut view = ViewDistance {
+            farclip: 3000.0,
+            distance_fog: true,
+            nearclip: NEARCLIP_DEFAULT,
+        };
+        assert_eq!(view.fog_span(125.0, 500.0), (125.0, 500.0));
+        view.distance_fog = false;
+        for (start, end) in [(125.0, 500.0), (-139.0, 278.0), (10.0, 40.0)] {
+            let (start, end) = view.fog_span(start, end);
+            for depth in [0.0f32, 500.0, 777.0, 1500.0, 3000.0] {
+                let visibility = ((end - depth) / (end - start)).clamp(0.0, 1.0);
+                assert_eq!(visibility, 1.0);
+            }
+        }
+        assert_eq!(view.farclip, 3000.0, "fog never disables the clipping wall");
+    }
+
     /// `0x511bc0`'s near stamp reaches the projection, and an unchanged one stays unmarked.
     #[test]
     fn the_near_plane_follows_the_cvar_and_settles() {
@@ -404,6 +469,7 @@ mod tests {
         // A `nearclip 0.3` write, from a player or an addon's `ConsoleExec`.
         app.insert_resource(ViewDistance {
             farclip: 350.0,
+            distance_fog: true,
             nearclip: 0.3,
         });
         app.update();

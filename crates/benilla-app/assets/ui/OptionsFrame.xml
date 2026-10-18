@@ -4,7 +4,8 @@
         window replaces the 1.12 four-panel family, which is much worse to use; the 1.12 frames
         still load, hidden, for addons. Every art byte is 1.12-native or a colour fill, so era
         names below cite geometry only. Hiding discards pending edits and Apply commits outright.
-        A slider shows the 1.12 range; an out-of-range value displays clamped, not written back.
+        Sliders use the 1.12 ranges except Terrain Distance, extended for skate filming.
+        An out-of-range value displays clamped, not written back.
     -->
 
     <!-- The era's 14 and 20 white fonts, outside Fonts.xml's 1.12 set; MasterFont's shadow. -->
@@ -405,6 +406,10 @@
 
         -- ── The setting pages: 1.12 rows in the era Settings grammar ──
         -- Descriptions 1.12 lacks take a BENILLA_ prefix.
+        BENILLA_TOOLTIP_DISTANCE_FOG =
+            "Adds the zone's distance haze to scenery. Turn this off for a clear view out to "
+            .. "Terrain Distance. The sky and distant terrain silhouettes keep their colours."
+
         BENILLA_TOOLTIP_RENDER_SCALE =
             "Draws the 3D world at a fraction of the window's resolution, or larger than it. "
             .. "The interface is unaffected at any setting.\n\n"
@@ -449,7 +454,7 @@
                 "RowBackgroundSound",
             },
             Graphics = {
-                "RowUiScale", "RowFarclip", "RowWorldDetail", "RowSpellDetail", "RowBrightness",
+                "RowUiScale", "RowFarclip", "RowDistanceFog", "RowWorldDetail", "RowSpellDetail", "RowBrightness",
                 "RowWeatherDensity",
                 "RowDisplayMode", "RowVerticalSync", "RowRenderScale",
             },
@@ -601,6 +606,8 @@
 
         -- SetMinMaxValues re-clamps and fires OnValueChanged, which must not write back.
         function BenillaOptionsSliderRow_Setup(row, min, max, step, fmt, stops)
+            -- Deviation: our filming range also survives the stock-table refresh on show.
+            if row.cvar == "farclip" then max, step = 3000, 1 end
             local slider = getglobal(row:GetName() .. "ControlSlider")
             row.fmt = fmt
             -- Kept for the "travel" readout, a share of the row's own range.
@@ -1862,10 +1869,20 @@
                                                     OptionsFrameSliders[2].valueStep, "raw")
                                             </OnLoad></Scripts>
                                         </Frame>
-                                        <Frame name="$parentRowWorldDetail" inherits="BenillaOptionsSliderRowTemplate">
+                                        <Frame name="$parentRowDistanceFog" inherits="BenillaOptionsCheckboxRowTemplate">
                                             <Anchors>
                                                 <Anchor point="TOPLEFT" relativeTo="$parentRowFarclip" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-9"/></Offset></Anchor>
                                                 <Anchor point="TOPRIGHT" relativeTo="$parentRowFarclip" relativePoint="BOTTOMRIGHT"><Offset><AbsDimension x="0" y="-9"/></Offset></Anchor>
+                                            </Anchors>
+                                            <Scripts><OnLoad>
+                                                BenillaOptionsRow_OnLoad(this, "distanceFog", "Distance Fog",
+                                                    "BENILLA_TOOLTIP_DISTANCE_FOG")
+                                            </OnLoad></Scripts>
+                                        </Frame>
+                                        <Frame name="$parentRowWorldDetail" inherits="BenillaOptionsSliderRowTemplate">
+                                            <Anchors>
+                                                <Anchor point="TOPLEFT" relativeTo="$parentRowDistanceFog" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-9"/></Offset></Anchor>
+                                                <Anchor point="TOPRIGHT" relativeTo="$parentRowDistanceFog" relativePoint="BOTTOMRIGHT"><Offset><AbsDimension x="0" y="-9"/></Offset></Anchor>
                                             </Anchors>
                                             <Scripts><OnLoad>
                                                 BenillaOptionsRow_OnLoad(this, "WorldDetail", "Environment Detail",

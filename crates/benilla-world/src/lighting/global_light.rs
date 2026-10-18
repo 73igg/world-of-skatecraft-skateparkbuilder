@@ -206,6 +206,8 @@ fn build_light_data(
     let l = &*light;
     let fog_enable = if debug.lighting.disable_fog { 0.0 } else { 1.0 };
     let farclip = view.farclip;
+    let (fog_start, fog_end) = view.fog_span(l.fog_start, l.fog_end);
+    let (wmo_fog_start, wmo_fog_end) = view.fog_span(l.wmo_fog_start, l.wmo_fog_end);
     // River and lake share the non-ocean swatch.
     let (rs, rd, rsa, rda) = l.water_colors(LiquidKind::Still);
     let (os, od, osa, oda) = l.water_colors(LiquidKind::Ocean);
@@ -216,7 +218,7 @@ fn build_light_data(
     let rows = &mut fresh.rows;
     rows[3] = [l.spec[0], l.spec[1], l.spec[2], 20.0]; // 3 light_spec (w=terrain shininess 20)
     rows[4] = [l.fog_color[0], l.fog_color[1], l.fog_color[2], fog_enable]; // 4 fog_color (w=enable)
-    rows[5] = [l.fog_start, l.fog_end, 0.0, farclip]; // 5 fog_params (z unused; w=farclip)
+    rows[5] = [fog_start, fog_end, 0.0, farclip]; // 5 fog_params (z unused; w=farclip)
     rows[13] = [rs[0], rs[1], rs[2], rsa]; // 13 water river shallow (w=alpha)
     rows[14] = [rd[0], rd[1], rd[2], rda]; // 14 water river deep
     rows[15] = [os[0], os[1], os[2], osa]; // 15 water ocean shallow
@@ -230,7 +232,7 @@ fn build_light_data(
         l.wmo_fog_color[2],
         fog_enable,
     ];
-    rows[19] = [l.wmo_fog_start, l.wmo_fog_end, 0.0, 0.0];
+    rows[19] = [wmo_fog_start, wmo_fog_end, 0.0, 0.0];
     // Rows 0-2, 6-12.xyz and 17.yzw: the model-light core.
     pack_model_core_rows(rows, l.ambient, l.diffuse, l.sun_dir);
     // The point table: lights within [`POINT_PACK_RADIUS`], nearest first past capacity. Dividing
